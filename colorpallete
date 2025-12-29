@@ -1,0 +1,8 @@
+| **Color** | **Hex Code** | **Usage** |
+| --- | --- | --- |
+| **Sky Blue** | `#88B1D8` | Primary buttons (Book), header backgrounds, and active states. |
+| **Soft Blue** | `#D6E6F2` | Secondary backgrounds, inactive icons, and message bubbles. |
+| **Alice Blue** | `#F4F8FB` | Main app background and container fills. |
+| **Deep Navy** | `#324A5E` | Primary text (Headings), profile names, and time slots. |
+| **Medium Gray** | `#828282` | Secondary text (Subtitles), captions, and icon labels. |
+| **Pure White** | `#FFFFFF` | Card backgrounds and button text. |
