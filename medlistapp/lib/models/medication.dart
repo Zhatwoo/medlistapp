@@ -12,6 +12,9 @@ class Medication {
   final String agent;
   final String dispensingMode;
   final String? selection;
+  final String? storageCondition;
+  final bool isControlledDrug;
+  final String? therapeuticCategory;
 
   Medication({
     this.id,
@@ -27,6 +30,9 @@ class Medication {
     required this.agent,
     required this.dispensingMode,
     this.selection,
+    this.storageCondition,
+    this.isControlledDrug = false,
+    this.therapeuticCategory,
   });
 
   // Convert to Map for database
@@ -45,6 +51,9 @@ class Medication {
       'agent': agent,
       'dispensing_mode': dispensingMode,
       'selection': selection,
+      'storage_condition': storageCondition,
+      'is_controlled_drug': isControlledDrug ? 1 : 0,
+      'therapeutic_category': therapeuticCategory,
     };
   }
 
@@ -64,6 +73,9 @@ class Medication {
       agent: map['agent'] as String,
       dispensingMode: map['dispensing_mode'] as String,
       selection: map['selection'] as String?,
+      storageCondition: map['storage_condition'] as String?,
+      isControlledDrug: (map['is_controlled_drug'] as int?) == 1,
+      therapeuticCategory: map['therapeutic_category'] as String?,
     );
   }
 
@@ -88,6 +100,9 @@ class Medication {
     String? agent,
     String? dispensingMode,
     String? selection,
+    String? storageCondition,
+    bool? isControlledDrug,
+    String? therapeuticCategory,
   }) {
     return Medication(
       id: id ?? this.id,
@@ -103,6 +118,9 @@ class Medication {
       agent: agent ?? this.agent,
       dispensingMode: dispensingMode ?? this.dispensingMode,
       selection: selection ?? this.selection,
+      storageCondition: storageCondition ?? this.storageCondition,
+      isControlledDrug: isControlledDrug ?? this.isControlledDrug,
+      therapeuticCategory: therapeuticCategory ?? this.therapeuticCategory,
     );
   }
 }

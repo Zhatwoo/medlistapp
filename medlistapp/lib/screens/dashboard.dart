@@ -1,24 +1,26 @@
 import 'package:flutter/material.dart';
-import 'package:medlistapp/widgets/dashboard_stat_card.dart';
-import 'package:medlistapp/widgets/search_bar_widget.dart';
-import 'package:medlistapp/widgets/expiry_alert_card.dart';
-import 'package:medlistapp/widgets/category_grid_widget.dart';
-import 'package:medlistapp/services/medication_service.dart';
-import 'package:medlistapp/services/stock_service.dart';
-import 'package:medlistapp/services/expiry_service.dart';
-import 'package:medlistapp/services/verification_service.dart';
-import 'package:medlistapp/services/audit_service.dart';
-import 'package:medlistapp/services/interaction_service.dart';
+import 'package:medlistapp/widgets/dashboardstatcard.dart';
+import 'package:medlistapp/widgets/searchbarwidget.dart';
+import 'package:medlistapp/widgets/expiryalertcard.dart';
+import 'package:medlistapp/widgets/categorygridwidget.dart';
+import 'package:medlistapp/services/medicationservice.dart';
+import 'package:medlistapp/services/stockservice.dart';
+import 'package:medlistapp/services/expiryservice.dart';
+import 'package:medlistapp/services/verificationservice.dart';
+import 'package:medlistapp/services/auditservice.dart';
+import 'package:medlistapp/services/interactionservice.dart';
+import 'package:medlistapp/services/patientservice.dart';
 import 'package:medlistapp/models/medication.dart';
-import 'package:medlistapp/models/stock_item.dart';
-import 'package:medlistapp/models/verification_result.dart';
-import 'package:medlistapp/models/drug_interaction.dart';
-import 'package:medlistapp/screens/medication_list_page.dart';
-import 'package:medlistapp/screens/expiry_management_page.dart';
-import 'package:medlistapp/screens/stock_reconciliation_page.dart';
-import 'package:medlistapp/screens/categories_page.dart';
-import 'package:medlistapp/screens/medication_verification_page.dart';
-import 'package:medlistapp/utils/app_colors.dart';
+import 'package:medlistapp/models/stockitem.dart';
+import 'package:medlistapp/models/verificationresult.dart';
+import 'package:medlistapp/models/druginteraction.dart';
+import 'package:medlistapp/screens/medicationlistpage.dart';
+import 'package:medlistapp/screens/expirymanagementpage.dart';
+import 'package:medlistapp/screens/stockreconciliationpage.dart';
+import 'package:medlistapp/screens/categoriespage.dart';
+import 'package:medlistapp/screens/medicationverificationpage.dart';
+import 'package:medlistapp/screens/patientlistpage.dart';
+import 'package:medlistapp/utils/appcolors.dart';
 
 class Dashboard extends StatefulWidget {
   const Dashboard({super.key});
@@ -34,6 +36,7 @@ class _DashboardState extends State<Dashboard> {
   final VerificationService _verificationService = VerificationService();
   final AuditService _auditService = AuditService();
   final InteractionService _interactionService = InteractionService();
+  final PatientService _patientService = PatientService();
   final TextEditingController _searchController = TextEditingController();
 
   int _totalMedications = 0;
@@ -43,6 +46,7 @@ class _DashboardState extends State<Dashboard> {
   int _recentVerifications = 0;
   int _mimsAccessCount = 0;
   int _interactionAlerts = 0;
+  int _totalPatients = 0;
   List<StockItem> _expiringItems = [];
   List<VerificationResult> _recentVerificationLogs = [];
   List<DrugInteraction> _recentInteractions = [];
@@ -64,6 +68,7 @@ class _DashboardState extends State<Dashboard> {
       final recentVerifications = await _verificationService.getRecentVerifications(limit: 5);
       final mimsLogs = await _auditService.getAuditLogs(actionType: 'mims_access');
       final recentInteractions = await _interactionService.getInteractionsForMedication('1'); // Sample
+      final patients = await _patientService.getAllPatients();
 
       setState(() {
         _totalMedications = medications.length;
@@ -79,6 +84,7 @@ class _DashboardState extends State<Dashboard> {
           i.severity == InteractionSeverity.contraindicated
         ).length;
         _recentInteractions = recentInteractions.take(3).toList();
+        _totalPatients = patients.length;
         _isLoading = false;
       });
     } catch (e) {
@@ -320,6 +326,18 @@ class _DashboardState extends State<Dashboard> {
                                   );
                                 },
                               ),
+                              CategoryItem(
+                                label: 'Patients',
+                                icon: Icons.people,
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => const PatientListPage(),
+                                    ),
+                                  );
+                                },
+                              ),
                             ],
                             crossAxisCount: 4,
                           ),
@@ -368,6 +386,20 @@ class _DashboardState extends State<Dashboard> {
                                 context,
                                 MaterialPageRoute(
                                   builder: (context) => const StockReconciliationPage(),
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 10),
+                          _buildCompactCard(
+                            context,
+                            title: 'Total Patients',
+                            value: _totalPatients.toString(),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const PatientListPage(),
                                 ),
                               );
                             },

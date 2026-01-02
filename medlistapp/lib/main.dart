@@ -1,9 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:medlistapp/utils/app_theme.dart';
-import 'package:medlistapp/screens/loading_screen.dart';
-import 'package:medlistapp/utils/route_generator.dart';
+import 'package:medlistapp/utils/apptheme.dart';
+import 'package:medlistapp/screens/loadingscreen.dart';
+import 'package:medlistapp/utils/routegenerator.dart';
+import 'package:medlistapp/services/notificationservice.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize notification service
+  final notificationService = NotificationService();
+  await notificationService.initialize();
+  await notificationService.requestPermissions();
+  
   runApp(const MyApp());
 }
 
