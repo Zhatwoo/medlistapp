@@ -5,6 +5,7 @@ import 'package:medlistapp/services/stockservice.dart';
 import 'package:medlistapp/services/verificationservice.dart';
 import 'package:medlistapp/services/auditservice.dart';
 import 'package:medlistapp/services/mimsservice.dart';
+import 'package:medlistapp/services/medicationservice.dart';
 import 'package:intl/intl.dart';
 
 class ReportService {
@@ -14,6 +15,7 @@ class ReportService {
   final VerificationService _verificationService = VerificationService();
   final AuditService _auditService = AuditService();
   final MimsService _mimsService = MimsService();
+  final MedicationService _medicationService = MedicationService();
 
   // Generate expiry report
   Future<Report> generateExpiryReport(DateTime startDate, DateTime endDate) async {
@@ -137,6 +139,78 @@ class ReportService {
     final report = Report(
       type: ReportType.mimsAccess,
       title: 'MIMS Access Report - ${DateFormat('MMM dd, yyyy').format(startDate)} to ${DateFormat('MMM dd, yyyy').format(endDate)}',
+      data: data,
+      startDate: startDate,
+      endDate: endDate,
+    );
+
+    await _dbService.insertReport(report);
+    return report;
+  }
+
+  // Generate stock movement report (Section 11.1)
+  Future<Report> generateStockMovementReport(DateTime startDate, DateTime endDate) async {
+    final allAdjustments = await _dbService.getAllStockAdjustments();
+    
+    // Filter adjustments by date range
+    final filteredAdjustments = allAdjustments.where((adj) =>
+      adj.adjustedAt.isAfter(startDate.subtract(const Duration(days: 1))) &&
+      adj.adjustedAt.isBefore(endDate.add(const Duration(days: 1)))
+    ).toList();
+
+    // Group by reason
+    final adjustmentsByReason = <String, int>{};
+    for (final adj in filteredAdjustments) {
+      final reason = adj.reason.name;
+      adjustmentsByReason[reason] = (adjustmentsByReason[reason] ?? 0) + 1;
+    }
+
+    // Calculate totals
+    int totalIncrease = 0;
+    int totalDecrease = 0;
+    for (final adj in filteredAdjustments) {
+      final diff = adj.quantityDifference;
+      if (diff > 0) {
+        totalIncrease += diff;
+      } else {
+        totalDecrease += diff.abs();
+      }
+    }
+
+    // Get medication details for each adjustment
+    final adjustmentsWithDetails = <Map<String, dynamic>>[];
+    for (final adj in filteredAdjustments) {
+      final stockItem = await _stockService.getStockItemById(adj.stockItemId);
+      if (stockItem != null) {
+        final medication = await _medicationService.getMedicationById(stockItem.medicationId);
+        adjustmentsWithDetails.add({
+          'id': adj.id,
+          'medication_name': medication?.tradeName ?? 'Unknown',
+          'medication_id': stockItem.medicationId,
+          'stock_item_id': adj.stockItemId,
+          'batch_number': stockItem.batchNumber,
+          'old_quantity': adj.oldQuantity,
+          'new_quantity': adj.newQuantity,
+          'quantity_difference': adj.quantityDifference,
+          'reason': adj.reason.name,
+          'notes': adj.notes,
+          'adjusted_at': adj.adjustedAt.toIso8601String(),
+          'adjusted_by': adj.adjustedBy,
+        });
+      }
+    }
+
+    final data = {
+      'total_adjustments': filteredAdjustments.length,
+      'total_increase': totalIncrease,
+      'total_decrease': totalDecrease,
+      'adjustments_by_reason': adjustmentsByReason,
+      'adjustments': adjustmentsWithDetails,
+    };
+
+    final report = Report(
+      type: ReportType.stockMovement,
+      title: 'Stock Movement Report - ${DateFormat('MMM dd, yyyy').format(startDate)} to ${DateFormat('MMM dd, yyyy').format(endDate)}',
       data: data,
       startDate: startDate,
       endDate: endDate,

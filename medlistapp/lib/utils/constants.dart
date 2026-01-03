@@ -3,7 +3,7 @@ class AppConstants {
 
   // Database
   static const String databaseName = 'medlistapp.db';
-  static const int databaseVersion = 6; // Incremented for stock management enhancements
+  static const int databaseVersion = 8; // Incremented for comprehensive company code support
 
   // Table names
   static const String tableMedications = 'medications';
@@ -16,7 +16,6 @@ class AppConstants {
   static const String tableVerificationHistory = 'verification_history';
   static const String tableReports = 'reports';
   static const String tableBarcodeData = 'barcode_data';
-  static const String tablePatients = 'patients';
   static const String tableNotifications = 'notifications';
   static const String tableStockAdjustments = 'stock_adjustments';
 

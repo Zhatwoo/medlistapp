@@ -15,6 +15,7 @@ class Medication {
   final String? storageCondition;
   final bool isControlledDrug;
   final String? therapeuticCategory;
+  final String? companyCode; // Company code for multi-tenant support
 
   Medication({
     this.id,
@@ -33,6 +34,7 @@ class Medication {
     this.storageCondition,
     this.isControlledDrug = false,
     this.therapeuticCategory,
+    this.companyCode,
   });
 
   // Convert to Map for database
@@ -54,6 +56,7 @@ class Medication {
       'storage_condition': storageCondition,
       'is_controlled_drug': isControlledDrug ? 1 : 0,
       'therapeutic_category': therapeuticCategory,
+      'company_code': companyCode,
     };
   }
 
@@ -76,6 +79,7 @@ class Medication {
       storageCondition: map['storage_condition'] as String?,
       isControlledDrug: (map['is_controlled_drug'] as int?) == 1,
       therapeuticCategory: map['therapeutic_category'] as String?,
+      companyCode: map['company_code'] as String?,
     );
   }
 
@@ -103,6 +107,7 @@ class Medication {
     String? storageCondition,
     bool? isControlledDrug,
     String? therapeuticCategory,
+    String? companyCode,
   }) {
     return Medication(
       id: id ?? this.id,
@@ -121,6 +126,7 @@ class Medication {
       storageCondition: storageCondition ?? this.storageCondition,
       isControlledDrug: isControlledDrug ?? this.isControlledDrug,
       therapeuticCategory: therapeuticCategory ?? this.therapeuticCategory,
+      companyCode: companyCode ?? this.companyCode,
     );
   }
 }

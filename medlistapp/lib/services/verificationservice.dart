@@ -7,6 +7,7 @@ import 'package:medlistapp/services/mimsservice.dart';
 import 'package:medlistapp/services/interactionservice.dart';
 import 'package:medlistapp/services/databaseservice.dart';
 import 'package:medlistapp/services/auditservice.dart';
+import 'package:medlistapp/services/barcodescannerservice.dart';
 
 class VerificationService {
   final MedicationService _medicationService = MedicationService();
@@ -37,8 +38,13 @@ class VerificationService {
         identityVerified = true;
       }
     } else if (barcode != null && barcode.isNotEmpty) {
-      // Barcode lookup would go here
-      // For now, we'll search by barcode if it matches a medication identifier
+      // Use BarcodeScannerService to match barcode
+      final barcodeScannerService = BarcodeScannerService();
+      final barcodeResult = await barcodeScannerService.matchBarcode(barcode, null);
+      if (barcodeResult.matched && barcodeResult.medication != null) {
+        medication = barcodeResult.medication;
+        identityVerified = true;
+      }
     }
 
     if (medication == null) {

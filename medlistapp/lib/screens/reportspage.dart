@@ -21,6 +21,7 @@ class _ReportsPageState extends State<ReportsPage> {
   final List<ReportType> _reportTypes = [
     ReportType.expiry,
     ReportType.stock,
+    ReportType.stockMovement,
     ReportType.verification,
     ReportType.mimsAccess,
     ReportType.audit,
@@ -61,6 +62,9 @@ class _ReportsPageState extends State<ReportsPage> {
           break;
         case ReportType.stock:
           report = await _reportService.generateStockReport(_startDate, _endDate);
+          break;
+        case ReportType.stockMovement:
+          report = await _reportService.generateStockMovementReport(_startDate, _endDate);
           break;
         case ReportType.verification:
           report = await _reportService.generateVerificationReport(_startDate, _endDate);
@@ -311,6 +315,8 @@ class _ReportsPageState extends State<ReportsPage> {
         return 'Expiry';
       case ReportType.stock:
         return 'Stock';
+      case ReportType.stockMovement:
+        return 'Stock Movement';
       case ReportType.verification:
         return 'Verification';
       case ReportType.mimsAccess:

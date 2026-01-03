@@ -9,6 +9,10 @@ import 'package:medlistapp/services/datainitializationservice.dart';
 import 'package:medlistapp/services/exportservice.dart';
 import 'package:medlistapp/models/exportformat.dart';
 import 'package:medlistapp/services/notificationservice.dart';
+import 'package:medlistapp/services/mohdataparser.dart';
+import 'package:medlistapp/services/authservice.dart';
+import 'package:medlistapp/services/medicationservice.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -24,6 +28,8 @@ class _SettingsPageState extends State<SettingsPage> {
   final MimsCacheService _cacheService = MimsCacheService();
   final NotificationService _notificationService = NotificationService();
   final ExportService _exportService = ExportService();
+  final MedicationService _medicationService = MedicationService();
+  final AuthService _authService = AuthService();
   
   int _expiryAlertDays = AppConstants.defaultExpiryAlertDays;
   int _lowStockThreshold = AppConstants.defaultLowStockThreshold;
@@ -129,6 +135,255 @@ class _SettingsPageState extends State<SettingsPage> {
         const SnackBar(content: Text('Cache cleared successfully')),
       );
     }
+  }
+
+  Future<void> _importMedications() async {
+    try {
+      // Pick XLSX file
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['xlsx', 'xls'],
+        allowMultiple: false,
+      );
+
+      if (result == null || result.files.isEmpty) {
+        return; // User cancelled
+      }
+
+      final file = result.files.first;
+      if (file.path == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('File path not available')),
+          );
+        }
+        return;
+      }
+
+      // Show confirmation dialog
+      final shouldClear = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Import Medications'),
+          content: const Text(
+            'Do you want to clear existing medications before importing?\n\n'
+            'Selecting "Yes" will replace all existing medications.\n'
+            'Selecting "No" will add/update medications from the file.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('No (Add/Update)'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Yes (Replace All)'),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldClear == null) return;
+
+      // Show loading dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              const Text('Importing medications...'),
+              const SizedBox(height: 8),
+              Text(
+                'Please wait, this may take a few moments.',
+                style: Theme.of(context).textTheme.bodySmall,
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+
+      // Get company code from current user
+      final authService = AuthService();
+      final companyCode = await authService.getCurrentUserCompanyCode();
+      
+      if (companyCode == null || companyCode.isEmpty) {
+        if (mounted) {
+          Navigator.pop(context); // Close loading dialog
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Please set your company code in profile settings first'),
+              backgroundColor: AppColors.errorRed,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Import medications in background
+      try {
+        final importResult = await MOHDataParser.importMOHFromXLSX(
+          file.path!,
+          clearExisting: shouldClear,
+          companyCode: companyCode,
+        );
+
+        if (mounted) {
+          Navigator.pop(context); // Close loading dialog
+          _showImportResult(importResult);
+        }
+      } catch (e) {
+        if (mounted) {
+          Navigator.pop(context); // Close loading dialog
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error importing file: $e')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // Close loading dialog if open
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error importing file: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _syncMedicines() async {
+    // Check if user has company code
+    final companyCode = await _authService.getCurrentUserCompanyCode();
+    if (companyCode == null || companyCode.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please set your company code in profile settings first'),
+            backgroundColor: AppColors.errorRed,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Show confirmation dialog
+    final shouldSync = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sync Medicines'),
+        content: const Text(
+          'This will download all medicines from your company and update your local database.\n\n'
+          'This may take a few moments depending on the number of medicines.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.skyBlue,
+              foregroundColor: AppColors.pureWhite,
+            ),
+            child: const Text('Sync'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldSync != true) return;
+
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            const Text('Syncing medicines...'),
+            const SizedBox(height: 8),
+            Text(
+              'Please wait, this may take a few moments.',
+              style: Theme.of(context).textTheme.bodySmall,
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final syncResult = await _medicationService.syncMedicinesFromFirestore();
+      
+      if (mounted) {
+        Navigator.pop(context); // Close loading dialog
+        
+        if (syncResult.success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                syncResult.syncedCount > 0
+                    ? 'Successfully synced ${syncResult.syncedCount} medicines from your company'
+                    : 'No new medicines to sync',
+              ),
+              backgroundColor: AppColors.successGreen,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Sync failed: ${syncResult.message}'),
+              backgroundColor: AppColors.errorRed,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // Close loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error syncing medicines: $e'),
+            backgroundColor: AppColors.errorRed,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showImportResult(ImportResult result) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(result.success ? 'Import Successful' : 'Import Failed'),
+        content: SingleChildScrollView(
+          child: Text(
+            result.message +
+                (result.success
+                    ? '\n\nImported: ${result.importedCount}\n'
+                        'Skipped: ${result.skippedCount}\n\n'
+                        'Note: Please pull down to refresh the medication list to see the imported items.'
+                    : ''),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _exportData() async {
@@ -532,6 +787,26 @@ class _SettingsPageState extends State<SettingsPage> {
                           trailing: IconButton(
                             icon: const Icon(Icons.download),
                             onPressed: _exportData,
+                          ),
+                        ),
+                        const Divider(),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Sync Medicines'),
+                          subtitle: const Text('Download latest medicines from your company'),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.sync),
+                            onPressed: _syncMedicines,
+                          ),
+                        ),
+                        const Divider(),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Import Medications'),
+                          subtitle: const Text('Import from MOH Price List (XLSX)'),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.upload_file),
+                            onPressed: _importMedications,
                           ),
                         ),
                       ],

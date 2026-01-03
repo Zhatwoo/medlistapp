@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "296137057306",
+    "project_id": "medlistapp",
+    "storage_bucket": "medlistapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:296137057306:android:460b3d69e48d6fbdac5da3",
+        "android_client_info": {
+          "package_name": "com.medlistapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "296137057306-qrhi6mkftuaqp96eo96nur7k849mj16v.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.medlistapp",
+            "certificate_hash": "a544882103ee929980c6030774cfc3a4a21f2f22"
+          }
+        },
+        {
+          "client_id": "296137057306-6u05jgggb9ndm9eed2aqe14989tbsfmq.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBIXTNvRAl2NXElsoQBXqP14QRyM0fkgRs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "296137057306-6u05jgggb9ndm9eed2aqe14989tbsfmq.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "296137057306-54id5679tovjv12vf9b618k0rf1d7cu3.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.medistappios"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:medlistapp/services/diagnosishelperservice.dart';
-import 'package:medlistapp/services/patientservice.dart';
 import 'package:medlistapp/models/medication.dart';
-import 'package:medlistapp/models/patient.dart';
 import 'package:medlistapp/utils/appcolors.dart';
+import 'package:medlistapp/widgets/clinicaldisclaimerwidget.dart';
 import 'package:medlistapp/screens/medicationdetailpage.dart';
-import 'package:medlistapp/screens/patientlistpage.dart';
 
 class DiagnosisHelperPage extends StatefulWidget {
   const DiagnosisHelperPage({super.key});
@@ -16,21 +14,12 @@ class DiagnosisHelperPage extends StatefulWidget {
 
 class _DiagnosisHelperPageState extends State<DiagnosisHelperPage> {
   final DiagnosisHelperService _service = DiagnosisHelperService();
-  final PatientService _patientService = PatientService();
   final TextEditingController _symptomController = TextEditingController();
   final List<String> _symptoms = [];
   final List<String> _currentMedications = [];
   final List<String> _allergies = [];
   List<MedicationRecommendation> _recommendations = [];
   bool _isLoading = false;
-  Patient? _selectedPatient;
-  List<Patient> _patients = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPatients();
-  }
 
   @override
   void dispose() {
@@ -38,28 +27,6 @@ class _DiagnosisHelperPageState extends State<DiagnosisHelperPage> {
     super.dispose();
   }
 
-  Future<void> _loadPatients() async {
-    try {
-      final patients = await _patientService.getAllPatients();
-      setState(() => _patients = patients);
-    } catch (e) {
-      // Handle error silently
-    }
-  }
-
-  void _onPatientSelected(Patient? patient) {
-    setState(() {
-      _selectedPatient = patient;
-      if (patient != null) {
-        _allergies.clear();
-        _allergies.addAll(patient.allergies);
-        // Note: currentMedications would need to be loaded from patient's medication history
-        // For now, we'll keep it as manual input
-      } else {
-        _allergies.clear();
-      }
-    });
-  }
 
   Future<void> _getRecommendations() async {
     if (_symptoms.isEmpty) {
@@ -105,118 +72,8 @@ class _DiagnosisHelperPageState extends State<DiagnosisHelperPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Disclaimer
-            Card(
-              color: AppColors.warningOrange.withOpacity(0.1),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Icon(Icons.warning, color: AppColors.warningOrange),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'This is an assistive tool only. Always consult a healthcare professional for proper diagnosis and treatment.',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.deepNavy,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            // Patient Selection
-            Text(
-              'Select Patient (Optional)',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<Patient?>(
-                    value: _selectedPatient,
-                    decoration: InputDecoration(
-                      hintText: 'Select a patient',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      prefixIcon: const Icon(Icons.person),
-                    ),
-                    items: [
-                      const DropdownMenuItem<Patient?>(
-                        value: null,
-                        child: Text('No patient selected'),
-                      ),
-                      ..._patients.map((patient) {
-                        return DropdownMenuItem<Patient?>(
-                          value: patient,
-                          child: Text(patient.name),
-                        );
-                      }),
-                    ],
-                    onChanged: _onPatientSelected,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.add),
-                  tooltip: 'Add new patient',
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const PatientListPage(),
-                      ),
-                    ).then((_) => _loadPatients());
-                  },
-                ),
-              ],
-            ),
-            if (_selectedPatient != null) ...[
-              const SizedBox(height: 8),
-              Card(
-                color: AppColors.softBlue,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Icon(Icons.info_outline, color: AppColors.skyBlue, size: 20),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Patient: ${_selectedPatient!.name}',
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            if (_selectedPatient!.allergies.isNotEmpty)
-                              Text(
-                                'Allergies: ${_selectedPatient!.allergies.join(", ")}',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            if (_selectedPatient!.conditions.isNotEmpty)
-                              Text(
-                                'Conditions: ${_selectedPatient!.conditions.join(", ")}',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close, size: 20),
-                        onPressed: () => _onPatientSelected(null),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+            // Clinical Disclaimer
+            const ClinicalDisclaimerWidget(padding: EdgeInsets.zero),
             const SizedBox(height: 16),
             // Symptoms input
             Text(

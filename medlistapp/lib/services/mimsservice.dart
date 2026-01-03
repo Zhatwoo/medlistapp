@@ -100,34 +100,71 @@ class MimsService {
         ).toList();
       }
 
-      // Search via API
-      final headers = await _getAuthHeaders();
-      final response = await http.get(
-        Uri.parse('$_apiBaseUrl/drugs/search?q=${Uri.encodeComponent(query)}'),
-        headers: headers,
-      );
+      // Check if credentials are configured before attempting API call
+      final credentialsConfigured = await hasCredentials();
+      if (!credentialsConfigured) {
+        // Return cached data if available, otherwise empty list
+        final allCached = await _cacheService.getAllCachedDrugs();
+        return allCached.where((drug) => 
+          drug.drugName.toLowerCase().contains(query.toLowerCase()) ||
+          (drug.genericName?.toLowerCase().contains(query.toLowerCase()) ?? false)
+        ).toList();
+      }
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final List<dynamic> results = data['results'] ?? [];
-        
-        final drugs = results.map((item) => _parseDrugData(item)).toList();
-        
-        // Cache results
-        for (final drug in drugs) {
-          await _cacheService.cacheDrug(drug);
+      // Search via API
+      try {
+        final headers = await _getAuthHeaders();
+        final response = await http.get(
+          Uri.parse('$_apiBaseUrl/drugs/search?q=${Uri.encodeComponent(query)}'),
+          headers: headers,
+        ).timeout(const Duration(seconds: 10));
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          final List<dynamic> results = data['results'] ?? [];
+          
+          final drugs = results.map((item) => _parseDrugData(item)).toList();
+          
+          // Cache results
+          for (final drug in drugs) {
+            await _cacheService.cacheDrug(drug);
+          }
+          
+          return drugs;
+        } else {
+          // API returned error status, fallback to cache
+          final allCached = await _cacheService.getAllCachedDrugs();
+          return allCached.where((drug) => 
+            drug.drugName.toLowerCase().contains(query.toLowerCase()) ||
+            (drug.genericName?.toLowerCase().contains(query.toLowerCase()) ?? false)
+          ).toList();
         }
-        
-        return drugs;
-      } else {
-        throw Exception('MIMS search failed: ${response.statusCode}');
+      } on Exception catch (e) {
+        // Handle authentication or API errors gracefully
+        final errorMessage = e.toString();
+        if (errorMessage.contains('credentials not configured') || 
+            errorMessage.contains('authentication failed')) {
+          // Return cached data if available
+          final allCached = await _cacheService.getAllCachedDrugs();
+          return allCached.where((drug) => 
+            drug.drugName.toLowerCase().contains(query.toLowerCase()) ||
+            (drug.genericName?.toLowerCase().contains(query.toLowerCase()) ?? false)
+          ).toList();
+        }
+        rethrow;
       }
     } catch (e) {
-      // Fallback to cache on error
-      final cached = await _cacheService.getAllCachedDrugs();
-      return cached.where((drug) => 
-        drug.drugName.toLowerCase().contains(query.toLowerCase())
-      ).toList();
+      // Fallback to cache on any error
+      try {
+        final allCached = await _cacheService.getAllCachedDrugs();
+        return allCached.where((drug) => 
+          drug.drugName.toLowerCase().contains(query.toLowerCase()) ||
+          (drug.genericName?.toLowerCase().contains(query.toLowerCase()) ?? false)
+        ).toList();
+      } catch (_) {
+        // If cache also fails, return empty list
+        return [];
+      }
     }
   }
 
@@ -140,49 +177,128 @@ class MimsService {
         return cached;
       }
 
-      // If offline, return null
+      // If offline, return cached data if available
       final prefs = await SharedPreferences.getInstance();
       final offlineMode = prefs.getBool('offline_mode') ?? false;
       if (offlineMode) {
-        return null;
+        // Try to find in cache by name
+        final allCached = await _cacheService.getAllCachedDrugs();
+        final matches = allCached.where((drug) => 
+          drug.drugCode == drugCode || 
+          drug.drugName.toLowerCase() == drugCode.toLowerCase()
+        ).toList();
+        return matches.isNotEmpty ? matches.first : null;
+      }
+
+      // Check if credentials are configured
+      final credentialsConfigured = await hasCredentials();
+      if (!credentialsConfigured) {
+        // Return cached data if available
+        final allCached = await _cacheService.getAllCachedDrugs();
+        final matches = allCached.where((drug) => 
+          drug.drugCode == drugCode || 
+          drug.drugName.toLowerCase() == drugCode.toLowerCase()
+        ).toList();
+        return matches.isNotEmpty ? matches.first : null;
       }
 
       // Fetch from API
-      final headers = await _getAuthHeaders();
-      final response = await http.get(
-        Uri.parse('$_apiBaseUrl/drugs/$drugCode'),
-        headers: headers,
-      );
+      try {
+        final headers = await _getAuthHeaders();
+        final response = await http.get(
+          Uri.parse('$_apiBaseUrl/drugs/$drugCode'),
+          headers: headers,
+        ).timeout(const Duration(seconds: 10));
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final drug = _parseDrugData(data);
-        
-        // Cache the monograph
-        await _cacheService.cacheDrug(drug);
-        
-        return drug;
-      } else {
-        return null;
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          final drug = _parseDrugData(data);
+          
+          // Cache the monograph
+          await _cacheService.cacheDrug(drug);
+          
+          return drug;
+        } else {
+          // API returned error, try cache
+          final allCached = await _cacheService.getAllCachedDrugs();
+          final matches = allCached.where((drug) => 
+            drug.drugCode == drugCode || 
+            drug.drugName.toLowerCase() == drugCode.toLowerCase()
+          ).toList();
+          return matches.isNotEmpty ? matches.first : null;
+        }
+      } on Exception catch (e) {
+        // Handle authentication or API errors gracefully
+        final errorMessage = e.toString();
+        if (errorMessage.contains('credentials not configured') || 
+            errorMessage.contains('authentication failed')) {
+          // Return cached data if available
+          final allCached = await _cacheService.getAllCachedDrugs();
+          final matches = allCached.where((drug) => 
+            drug.drugCode == drugCode || 
+            drug.drugName.toLowerCase() == drugCode.toLowerCase()
+          ).toList();
+          return matches.isNotEmpty ? matches.first : null;
+        }
+        // For other errors, try cache as fallback
+        final allCached = await _cacheService.getAllCachedDrugs();
+        final matches = allCached.where((drug) => 
+          drug.drugCode == drugCode || 
+          drug.drugName.toLowerCase() == drugCode.toLowerCase()
+        ).toList();
+        return matches.isNotEmpty ? matches.first : null;
       }
     } catch (e) {
-      return null;
+      // Final fallback to cache
+      try {
+        final allCached = await _cacheService.getAllCachedDrugs();
+        final matches = allCached.where((drug) => 
+          drug.drugCode == drugCode || 
+          drug.drugName.toLowerCase() == drugCode.toLowerCase()
+        ).toList();
+        return matches.isNotEmpty ? matches.first : null;
+      } catch (_) {
+        return null;
+      }
     }
   }
 
   // Get drug interactions
   Future<Map<String, dynamic>> getDrugInteractions(String drugCode, List<String> otherDrugCodes) async {
     try {
-      final headers = await _getAuthHeaders();
-      final response = await http.post(
-        Uri.parse('$_apiBaseUrl/drugs/$drugCode/interactions'),
-        headers: headers,
-        body: jsonEncode({'drug_codes': otherDrugCodes}),
-      );
+      // Check if credentials are configured
+      final credentialsConfigured = await hasCredentials();
+      if (!credentialsConfigured) {
+        return {};
+      }
 
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      } else {
+      // Check if offline mode is enabled
+      final prefs = await SharedPreferences.getInstance();
+      final offlineMode = prefs.getBool('offline_mode') ?? false;
+      if (offlineMode) {
+        return {};
+      }
+
+      try {
+        final headers = await _getAuthHeaders();
+        final response = await http.post(
+          Uri.parse('$_apiBaseUrl/drugs/$drugCode/interactions'),
+          headers: headers,
+          body: jsonEncode({'drug_codes': otherDrugCodes}),
+        ).timeout(const Duration(seconds: 10));
+
+        if (response.statusCode == 200) {
+          return jsonDecode(response.body);
+        } else {
+          return {};
+        }
+      } on Exception catch (e) {
+        // Handle authentication or API errors gracefully
+        final errorMessage = e.toString();
+        if (errorMessage.contains('credentials not configured') || 
+            errorMessage.contains('authentication failed')) {
+          return {};
+        }
         return {};
       }
     } catch (e) {

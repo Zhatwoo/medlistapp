@@ -9,17 +9,17 @@ import 'package:medlistapp/services/expiryservice.dart';
 import 'package:medlistapp/services/verificationservice.dart';
 import 'package:medlistapp/services/auditservice.dart';
 import 'package:medlistapp/services/interactionservice.dart';
-import 'package:medlistapp/services/patientservice.dart';
+import 'package:medlistapp/services/authservice.dart';
 import 'package:medlistapp/models/medication.dart';
 import 'package:medlistapp/models/stockitem.dart';
 import 'package:medlistapp/models/verificationresult.dart';
 import 'package:medlistapp/models/druginteraction.dart';
 import 'package:medlistapp/screens/medicationlistpage.dart';
 import 'package:medlistapp/screens/expirymanagementpage.dart';
+import 'package:medlistapp/screens/quickexpirycheckpage.dart';
 import 'package:medlistapp/screens/stockreconciliationpage.dart';
 import 'package:medlistapp/screens/categoriespage.dart';
 import 'package:medlistapp/screens/medicationverificationpage.dart';
-import 'package:medlistapp/screens/patientlistpage.dart';
 import 'package:medlistapp/utils/appcolors.dart';
 
 class Dashboard extends StatefulWidget {
@@ -36,7 +36,7 @@ class _DashboardState extends State<Dashboard> {
   final VerificationService _verificationService = VerificationService();
   final AuditService _auditService = AuditService();
   final InteractionService _interactionService = InteractionService();
-  final PatientService _patientService = PatientService();
+  final AuthService _authService = AuthService();
   final TextEditingController _searchController = TextEditingController();
 
   int _totalMedications = 0;
@@ -46,16 +46,67 @@ class _DashboardState extends State<Dashboard> {
   int _recentVerifications = 0;
   int _mimsAccessCount = 0;
   int _interactionAlerts = 0;
-  int _totalPatients = 0;
   List<StockItem> _expiringItems = [];
   List<VerificationResult> _recentVerificationLogs = [];
   List<DrugInteraction> _recentInteractions = [];
   bool _isLoading = true;
+  
+  // User profile data
+  String? _userDisplayName;
+  String? _userPhotoUrl;
+  String? _userEmail;
 
   @override
   void initState() {
     super.initState();
+    _loadUserProfile();
     _loadDashboardData();
+  }
+
+  Future<void> _loadUserProfile() async {
+    try {
+      final user = _authService.currentUser;
+      if (user != null) {
+        setState(() {
+          _userDisplayName = user.displayName;
+          _userPhotoUrl = user.photoURL;
+          _userEmail = user.email;
+        });
+
+        // Try to get user profile from Firestore if display name is not available
+        if (_userDisplayName == null || _userDisplayName!.isEmpty) {
+          try {
+            final userData = await _authService.getUserProfile();
+            if (userData != null) {
+              setState(() {
+                _userDisplayName = userData['displayName'] as String? ?? _userEmail?.split('@')[0] ?? 'User';
+                _userPhotoUrl = userData['photoURL'] as String? ?? _userPhotoUrl;
+              });
+            }
+          } catch (e) {
+            // If Firestore fails, use email as fallback
+            if (_userDisplayName == null || _userDisplayName!.isEmpty) {
+              setState(() {
+                _userDisplayName = _userEmail?.split('@')[0] ?? 'User';
+              });
+            }
+          }
+        }
+
+        // Fallback to email username if still no display name
+        if (_userDisplayName == null || _userDisplayName!.isEmpty) {
+          setState(() {
+            _userDisplayName = _userEmail?.split('@')[0] ?? 'User';
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading user profile: $e');
+      // Set default values
+      setState(() {
+        _userDisplayName = 'User';
+      });
+    }
   }
 
   Future<void> _loadDashboardData() async {
@@ -68,7 +119,6 @@ class _DashboardState extends State<Dashboard> {
       final recentVerifications = await _verificationService.getRecentVerifications(limit: 5);
       final mimsLogs = await _auditService.getAuditLogs(actionType: 'mims_access');
       final recentInteractions = await _interactionService.getInteractionsForMedication('1'); // Sample
-      final patients = await _patientService.getAllPatients();
 
       setState(() {
         _totalMedications = medications.length;
@@ -84,7 +134,6 @@ class _DashboardState extends State<Dashboard> {
           i.severity == InteractionSeverity.contraindicated
         ).length;
         _recentInteractions = recentInteractions.take(3).toList();
-        _totalPatients = patients.length;
         _isLoading = false;
       });
     } catch (e) {
@@ -136,18 +185,45 @@ class _DashboardState extends State<Dashboard> {
                         children: [
                           Row(
                             children: [
-                              // White Avatar Circle
+                              // Profile Picture or Avatar
                               Container(
                                 width: 60,
                                 height: 60,
-                                decoration: const BoxDecoration(
+                                decoration: BoxDecoration(
                                   color: AppColors.pureWhite,
                                   shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: AppColors.pureWhite,
+                                    width: 2,
+                                  ),
                                 ),
-                                child: const Icon(
-                                  Icons.person,
-                                  color: AppColors.skyBlue,
-                                  size: 32,
+                                child: ClipOval(
+                                  child: _userPhotoUrl != null && _userPhotoUrl!.isNotEmpty
+                                      ? Image.network(
+                                          _userPhotoUrl!,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (context, error, stackTrace) {
+                                            return const Icon(
+                                              Icons.person,
+                                              color: AppColors.skyBlue,
+                                              size: 32,
+                                            );
+                                          },
+                                          loadingBuilder: (context, child, loadingProgress) {
+                                            if (loadingProgress == null) return child;
+                                            return const Center(
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                valueColor: AlwaysStoppedAnimation<Color>(AppColors.skyBlue),
+                                              ),
+                                            );
+                                          },
+                                        )
+                                      : const Icon(
+                                          Icons.person,
+                                          color: AppColors.skyBlue,
+                                          size: 32,
+                                        ),
                                 ),
                               ),
                               const SizedBox(width: 16),
@@ -163,12 +239,14 @@ class _DashboardState extends State<Dashboard> {
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
-                                    'Your Name',
+                                    _userDisplayName ?? 'User',
                                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                                       color: AppColors.pureWhite,
                                       fontWeight: FontWeight.bold,
                                       fontSize: 20,
                                     ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ],
                               ),
@@ -303,6 +381,18 @@ class _DashboardState extends State<Dashboard> {
                                 },
                               ),
                               CategoryItem(
+                                label: 'Quick Check',
+                                icon: Icons.flash_on,
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => const QuickExpiryCheckPage(),
+                                    ),
+                                  );
+                                },
+                              ),
+                              CategoryItem(
                                 label: 'Stocks',
                                 icon: Icons.inventory,
                                 onTap: () {
@@ -322,18 +412,6 @@ class _DashboardState extends State<Dashboard> {
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) => const CategoriesPage(),
-                                    ),
-                                  );
-                                },
-                              ),
-                              CategoryItem(
-                                label: 'Patients',
-                                icon: Icons.people,
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => const PatientListPage(),
                                     ),
                                   );
                                 },
@@ -386,20 +464,6 @@ class _DashboardState extends State<Dashboard> {
                                 context,
                                 MaterialPageRoute(
                                   builder: (context) => const StockReconciliationPage(),
-                                ),
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 10),
-                          _buildCompactCard(
-                            context,
-                            title: 'Total Patients',
-                            value: _totalPatients.toString(),
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => const PatientListPage(),
                                 ),
                               );
                             },

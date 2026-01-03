@@ -1,11 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:medlistapp/utils/apptheme.dart';
-import 'package:medlistapp/screens/loadingscreen.dart';
+import 'package:medlistapp/screens/loginscreen.dart';
 import 'package:medlistapp/utils/routegenerator.dart';
 import 'package:medlistapp/services/notificationservice.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize Firebase
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    // If Firebase initialization fails, check configuration files
+    debugPrint('Firebase initialization error: $e');
+    debugPrint('Please ensure google-services.json (Android) and GoogleService-Info.plist (iOS) are properly configured.');
+  }
   
   // Initialize notification service
   final notificationService = NotificationService();
@@ -23,7 +36,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'MedList App',
       theme: AppTheme.lightTheme,
-      home: const LoadingScreen(),
+      home: const LoginScreen(),
       debugShowCheckedModeBanner: false,
       onGenerateRoute: (settings) {
         // Use custom route generator for all navigation

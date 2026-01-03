@@ -4,26 +4,41 @@ import 'package:medlistapp/models/stockadjustmentreason.dart';
 import 'package:medlistapp/services/databaseservice.dart';
 import 'package:medlistapp/services/notificationservice.dart';
 import 'package:medlistapp/services/medicationservice.dart';
+import 'package:medlistapp/services/authservice.dart';
 import 'package:medlistapp/utils/constants.dart';
 
 class StockService {
   final DatabaseService _dbService = DatabaseService();
   final MedicationService _medicationService = MedicationService();
   final NotificationService _notificationService = NotificationService();
+  final AuthService _authService = AuthService();
+
+  // Get current user's company code
+  Future<String?> _getCompanyCode() async {
+    return await _authService.getCurrentUserCompanyCode();
+  }
 
   // Add stock item
   Future<int> addStockItem(StockItem stockItem) async {
-    return await _dbService.insertStockItem(stockItem);
+    // Ensure stock item has company code
+    final companyCode = await _getCompanyCode();
+    // Get company code from medication
+    final medication = await _medicationService.getMedicationById(stockItem.medicationId);
+    final medCompanyCode = medication?.companyCode ?? companyCode;
+    final stockItemWithCode = stockItem.copyWith(companyCode: medCompanyCode);
+    return await _dbService.insertStockItem(stockItemWithCode);
   }
 
   // Get all stock items
   Future<List<StockItem>> getAllStockItems() async {
-    return await _dbService.getAllStockItems();
+    final companyCode = await _getCompanyCode();
+    return await _dbService.getAllStockItems(companyCode: companyCode);
   }
 
   // Get stock items by medication ID
   Future<List<StockItem>> getStockItemsByMedicationId(int medicationId) async {
-    return await _dbService.getStockItemsByMedicationId(medicationId);
+    final companyCode = await _getCompanyCode();
+    return await _dbService.getStockItemsByMedicationId(medicationId, companyCode: companyCode);
   }
 
   // Get stock item by ID
@@ -44,7 +59,8 @@ class StockService {
 
   // Get total stock quantity for a medication
   Future<int> getTotalStockQuantity(int medicationId) async {
-    return await _dbService.getTotalStockQuantity(medicationId);
+    final companyCode = await _getCompanyCode();
+    return await _dbService.getTotalStockQuantity(medicationId, companyCode: companyCode);
   }
 
   // Check if stock is low (below threshold)

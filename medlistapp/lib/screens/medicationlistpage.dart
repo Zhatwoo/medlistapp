@@ -7,6 +7,7 @@ import 'package:medlistapp/services/medicationservice.dart';
 import 'package:medlistapp/services/stockservice.dart';
 import 'package:medlistapp/screens/medicationdetailpage.dart';
 import 'package:medlistapp/utils/appcolors.dart';
+import 'package:medlistapp/utils/constants.dart';
 
 class MedicationListPage extends StatefulWidget {
   final String? searchQuery;
@@ -25,8 +26,12 @@ class _MedicationListPageState extends State<MedicationListPage> {
   List<Medication> _medications = [];
   List<Medication> _filteredMedications = [];
   bool _isLoading = true;
-  String _selectedFilter = 'All';
-  final List<String> _filters = ['All', 'Tablet', 'Solution', 'Capsule', 'Injection'];
+  String _selectedFormFilter = 'All';
+  String? _selectedStorageFilter;
+  String? _selectedStockLevelFilter;
+  final List<String> _formFilters = ['All', 'Tablet', 'Solution', 'Capsule', 'Injection'];
+  final List<String> _storageFilters = ['All', 'Room Temperature', 'Refrigerated', 'Frozen', 'Cool & Dry'];
+  final List<String> _stockLevelFilters = ['All', 'In Stock', 'Low Stock', 'Out of Stock', 'Overstocked'];
 
   @override
   void initState() {
@@ -49,7 +54,7 @@ class _MedicationListPageState extends State<MedicationListPage> {
         _filteredMedications = medications;
         _isLoading = false;
       });
-      _applyFilter();
+      await _applyFilter();
     } catch (e) {
       setState(() => _isLoading = false);
       if (mounted) {
@@ -60,21 +65,59 @@ class _MedicationListPageState extends State<MedicationListPage> {
     }
   }
 
-  void _applyFilter() {
-    if (_selectedFilter == 'All') {
-      setState(() => _filteredMedications = _medications);
-    } else {
-      setState(() {
-        _filteredMedications = _medications
-            .where((m) => m.form.toLowerCase().contains(_selectedFilter.toLowerCase()))
-            .toList();
-      });
+  Future<void> _applyFilter() async {
+    List<Medication> filtered = List.from(_medications);
+
+    // Apply form filter
+    if (_selectedFormFilter != 'All') {
+      filtered = filtered
+          .where((m) => m.form.toLowerCase().contains(_selectedFormFilter.toLowerCase()))
+          .toList();
     }
+
+    // Apply storage condition filter
+    if (_selectedStorageFilter != null && _selectedStorageFilter != 'All') {
+      filtered = filtered
+          .where((m) => m.storageCondition != null &&
+              m.storageCondition!.toLowerCase().contains(_selectedStorageFilter!.toLowerCase()))
+          .toList();
+    }
+
+    // Apply stock level filter
+    if (_selectedStockLevelFilter != null && _selectedStockLevelFilter != 'All') {
+      final stockFiltered = <Medication>[];
+      for (final med in filtered) {
+        if (med.id == null) continue;
+        final totalStock = await _stockService.getTotalStockQuantity(med.id!);
+        final isLowStock = await _stockService.isStockLow(med.id!, AppConstants.defaultLowStockThreshold);
+        final isOverstocked = await _stockService.isOverstocked(med.id!);
+
+        bool matches = false;
+        switch (_selectedStockLevelFilter) {
+          case 'In Stock':
+            matches = totalStock > 0 && !isLowStock && !isOverstocked;
+            break;
+          case 'Low Stock':
+            matches = isLowStock && totalStock > 0;
+            break;
+          case 'Out of Stock':
+            matches = totalStock == 0;
+            break;
+          case 'Overstocked':
+            matches = isOverstocked;
+            break;
+        }
+        if (matches) stockFiltered.add(med);
+      }
+      filtered = stockFiltered;
+    }
+
+    setState(() => _filteredMedications = filtered);
   }
 
   void _onSearchChanged(String query) {
     if (query.isEmpty) {
-      setState(() => _filteredMedications = _medications);
+      _applyFilter();
     } else {
       setState(() {
         _filteredMedications = _medications
@@ -84,6 +127,7 @@ class _MedicationListPageState extends State<MedicationListPage> {
                 m.company.toLowerCase().contains(query.toLowerCase()))
             .toList();
       });
+      _applyFilter();
     }
   }
 
@@ -116,22 +160,74 @@ class _MedicationListPageState extends State<MedicationListPage> {
                     onChanged: _onSearchChanged,
                   ),
                 ),
-                // Filter Chips (inspired by design)
+                // Filter Chips - Form
                 SizedBox(
                   height: 44,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _filters.length,
+                    itemCount: _formFilters.length,
                     itemBuilder: (context, index) {
-                      final filter = _filters[index];
+                      final filter = _formFilters[index];
                       return Padding(
                         padding: const EdgeInsets.only(right: 8),
                         child: FilterChipWidget(
                           label: filter,
-                          isSelected: _selectedFilter == filter,
+                          isSelected: _selectedFormFilter == filter,
                           onTap: () {
-                            setState(() => _selectedFilter = filter);
+                            setState(() => _selectedFormFilter = filter);
+                            _applyFilter();
+                          },
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Filter Chips - Storage Condition
+                SizedBox(
+                  height: 44,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: _storageFilters.length,
+                    itemBuilder: (context, index) {
+                      final filter = _storageFilters[index];
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChipWidget(
+                          label: filter,
+                          isSelected: _selectedStorageFilter == filter,
+                          onTap: () {
+                            setState(() {
+                              _selectedStorageFilter = filter == 'All' ? null : filter;
+                            });
+                            _applyFilter();
+                          },
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Filter Chips - Stock Level
+                SizedBox(
+                  height: 44,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: _stockLevelFilters.length,
+                    itemBuilder: (context, index) {
+                      final filter = _stockLevelFilters[index];
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChipWidget(
+                          label: filter,
+                          isSelected: _selectedStockLevelFilter == filter,
+                          onTap: () {
+                            setState(() {
+                              _selectedStockLevelFilter = filter == 'All' ? null : filter;
+                            });
                             _applyFilter();
                           },
                         ),

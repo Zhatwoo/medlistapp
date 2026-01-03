@@ -11,7 +11,6 @@ import 'package:medlistapp/models/druginteraction.dart';
 import 'package:medlistapp/models/verificationhistory.dart';
 import 'package:medlistapp/models/report.dart';
 import 'package:medlistapp/models/barcodedata.dart';
-import 'package:medlistapp/models/patient.dart';
 import 'package:medlistapp/models/notification.dart';
 import 'package:medlistapp/models/stockadjustment.dart';
 
@@ -43,10 +42,6 @@ class DatabaseService {
       // Add new tables for version 2
       await _createNewTables(db);
     }
-    if (oldVersion < 3) {
-      // Add patient table for version 3
-      await _createPatientTable(db);
-    }
     if (oldVersion < 4) {
       // Add notifications table for version 4
       await _createNotificationsTable(db);
@@ -59,6 +54,14 @@ class DatabaseService {
       // Add stock management enhancements for version 6
       await _addStockManagementFields(db);
       await _createStockAdjustmentsTable(db);
+    }
+    if (oldVersion < 7) {
+      // Add company_code field for multi-tenant support
+      await _addCompanyCodeField(db);
+    }
+    if (oldVersion < 8) {
+      // Add company_code to stock_items and other tables
+      await _addCompanyCodeToStockItems(db);
     }
   }
 
@@ -81,7 +84,8 @@ class DatabaseService {
         selection TEXT,
         storage_condition TEXT,
         is_controlled_drug INTEGER DEFAULT 0,
-        therapeutic_category TEXT
+        therapeutic_category TEXT,
+        company_code TEXT
       )
     ''');
 
@@ -97,6 +101,7 @@ class DatabaseService {
         purchase_date TEXT,
         manufacturing_date TEXT,
         expected_quantity INTEGER,
+        company_code TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT,
         FOREIGN KEY (medication_id) REFERENCES ${AppConstants.tableMedications}(id) ON DELETE CASCADE
@@ -133,8 +138,6 @@ class DatabaseService {
     
     // Create new tables
     await _createNewTables(db);
-    // Create patient table
-    await _createPatientTable(db);
     // Create notifications table
     await _createNotificationsTable(db);
     // Create stock adjustments table
@@ -284,28 +287,6 @@ class DatabaseService {
     ''');
   }
 
-  Future<void> _createPatientTable(Database db) async {
-    // Patients table
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS ${AppConstants.tablePatients} (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        age INTEGER NOT NULL,
-        gender TEXT NOT NULL,
-        weight REAL,
-        allergies TEXT,
-        conditions TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT
-      )
-    ''');
-
-    // Create index for patient name
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_patient_name 
-      ON ${AppConstants.tablePatients}(name)
-    ''');
-  }
 
   Future<void> _createNotificationsTable(Database db) async {
     // Notifications table
@@ -414,6 +395,40 @@ class DatabaseService {
     ''');
   }
 
+  Future<void> _addCompanyCodeField(Database db) async {
+    // Add company_code column to medications table
+    try {
+      await db.execute('''
+        ALTER TABLE ${AppConstants.tableMedications}
+        ADD COLUMN company_code TEXT
+      ''');
+    } catch (e) {
+      // Column might already exist, ignore error
+    }
+  }
+
+  Future<void> _addCompanyCodeToStockItems(Database db) async {
+    // Add company_code column to stock_items table
+    try {
+      await db.execute('''
+        ALTER TABLE ${AppConstants.tableStockItems}
+        ADD COLUMN company_code TEXT
+      ''');
+      
+      // Update existing stock items with company_code from their medications
+      await db.execute('''
+        UPDATE ${AppConstants.tableStockItems}
+        SET company_code = (
+          SELECT company_code 
+          FROM ${AppConstants.tableMedications} 
+          WHERE ${AppConstants.tableMedications}.id = ${AppConstants.tableStockItems}.medication_id
+        )
+      ''');
+    } catch (e) {
+      // Column might already exist, ignore error
+    }
+  }
+
   // Medications CRUD
   Future<int> insertMedication(Medication medication) async {
     final db = await database;
@@ -424,9 +439,18 @@ class DatabaseService {
     );
   }
 
-  Future<List<Medication>> getAllMedications() async {
+  Future<List<Medication>> getAllMedications({String? companyCode}) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(AppConstants.tableMedications);
+    final List<Map<String, dynamic>> maps;
+    if (companyCode != null && companyCode.isNotEmpty) {
+      maps = await db.query(
+        AppConstants.tableMedications,
+        where: 'company_code = ? OR company_code IS NULL',
+        whereArgs: [companyCode],
+      );
+    } else {
+      maps = await db.query(AppConstants.tableMedications);
+    }
     return List.generate(maps.length, (i) => Medication.fromMap(maps[i]));
   }
 
@@ -441,13 +465,22 @@ class DatabaseService {
     return Medication.fromMap(maps.first);
   }
 
-  Future<List<Medication>> searchMedications(String query) async {
+  Future<List<Medication>> searchMedications(String query, {String? companyCode}) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      AppConstants.tableMedications,
-      where: 'trade_name LIKE ? OR active_ingredient LIKE ? OR company LIKE ?',
-      whereArgs: ['%$query%', '%$query%', '%$query%'],
-    );
+    final List<Map<String, dynamic>> maps;
+    if (companyCode != null && companyCode.isNotEmpty) {
+      maps = await db.query(
+        AppConstants.tableMedications,
+        where: '(trade_name LIKE ? OR active_ingredient LIKE ? OR company LIKE ?) AND (company_code = ? OR company_code IS NULL)',
+        whereArgs: ['%$query%', '%$query%', '%$query%', companyCode],
+      );
+    } else {
+      maps = await db.query(
+        AppConstants.tableMedications,
+        where: 'trade_name LIKE ? OR active_ingredient LIKE ? OR company LIKE ?',
+        whereArgs: ['%$query%', '%$query%', '%$query%'],
+      );
+    }
     return List.generate(maps.length, (i) => Medication.fromMap(maps[i]));
   }
 
@@ -470,6 +503,11 @@ class DatabaseService {
     );
   }
 
+  Future<int> deleteAllMedications() async {
+    final db = await database;
+    return await db.delete(AppConstants.tableMedications);
+  }
+
   // Stock Items CRUD
   Future<int> insertStockItem(StockItem stockItem) async {
     final db = await database;
@@ -480,19 +518,37 @@ class DatabaseService {
     );
   }
 
-  Future<List<StockItem>> getAllStockItems() async {
+  Future<List<StockItem>> getAllStockItems({String? companyCode}) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(AppConstants.tableStockItems);
+    final List<Map<String, dynamic>> maps;
+    if (companyCode != null && companyCode.isNotEmpty) {
+      maps = await db.query(
+        AppConstants.tableStockItems,
+        where: 'company_code = ? OR company_code IS NULL',
+        whereArgs: [companyCode],
+      );
+    } else {
+      maps = await db.query(AppConstants.tableStockItems);
+    }
     return List.generate(maps.length, (i) => StockItem.fromMap(maps[i]));
   }
 
-  Future<List<StockItem>> getStockItemsByMedicationId(int medicationId) async {
+  Future<List<StockItem>> getStockItemsByMedicationId(int medicationId, {String? companyCode}) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      AppConstants.tableStockItems,
-      where: 'medication_id = ?',
-      whereArgs: [medicationId],
-    );
+    final List<Map<String, dynamic>> maps;
+    if (companyCode != null && companyCode.isNotEmpty) {
+      maps = await db.query(
+        AppConstants.tableStockItems,
+        where: 'medication_id = ? AND (company_code = ? OR company_code IS NULL)',
+        whereArgs: [medicationId, companyCode],
+      );
+    } else {
+      maps = await db.query(
+        AppConstants.tableStockItems,
+        where: 'medication_id = ?',
+        whereArgs: [medicationId],
+      );
+    }
     return List.generate(maps.length, (i) => StockItem.fromMap(maps[i]));
   }
 
@@ -593,13 +649,31 @@ class DatabaseService {
     return List.generate(maps.length, (i) => ExpiryRecord.fromMap(maps[i]));
   }
 
-  // Get total stock quantity for a medication
-  Future<int> getTotalStockQuantity(int medicationId) async {
+  Future<int> updateExpiryRecord(ExpiryRecord record) async {
     final db = await database;
-    final result = await db.rawQuery(
-      'SELECT SUM(quantity) as total FROM ${AppConstants.tableStockItems} WHERE medication_id = ?',
-      [medicationId],
+    return await db.update(
+      AppConstants.tableExpiryRecords,
+      record.toMap(),
+      where: 'id = ?',
+      whereArgs: [record.id],
     );
+  }
+
+  // Get total stock quantity for a medication
+  Future<int> getTotalStockQuantity(int medicationId, {String? companyCode}) async {
+    final db = await database;
+    final result;
+    if (companyCode != null && companyCode.isNotEmpty) {
+      result = await db.rawQuery(
+        'SELECT SUM(quantity) as total FROM ${AppConstants.tableStockItems} WHERE medication_id = ? AND (company_code = ? OR company_code IS NULL)',
+        [medicationId, companyCode],
+      );
+    } else {
+      result = await db.rawQuery(
+        'SELECT SUM(quantity) as total FROM ${AppConstants.tableStockItems} WHERE medication_id = ?',
+        [medicationId],
+      );
+    }
     return result.first['total'] as int? ?? 0;
   }
 
@@ -779,67 +853,6 @@ class DatabaseService {
     );
     if (maps.isEmpty) return null;
     return BarcodeData.fromMap(maps.first);
-  }
-
-  // Patients CRUD
-  Future<int> insertPatient(Patient patient) async {
-    final db = await database;
-    return await db.insert(
-      AppConstants.tablePatients,
-      patient.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-  }
-
-  Future<List<Patient>> getAllPatients() async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      AppConstants.tablePatients,
-      orderBy: 'name ASC',
-    );
-    return List.generate(maps.length, (i) => Patient.fromMap(maps[i]));
-  }
-
-  Future<Patient?> getPatientById(int id) async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      AppConstants.tablePatients,
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-    if (maps.isEmpty) return null;
-    return Patient.fromMap(maps.first);
-  }
-
-  Future<List<Patient>> searchPatients(String query) async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      AppConstants.tablePatients,
-      where: 'name LIKE ?',
-      whereArgs: ['%$query%'],
-      orderBy: 'name ASC',
-    );
-    return List.generate(maps.length, (i) => Patient.fromMap(maps[i]));
-  }
-
-  Future<int> updatePatient(Patient patient) async {
-    final db = await database;
-    final updatedPatient = patient.copyWith(updatedAt: DateTime.now());
-    return await db.update(
-      AppConstants.tablePatients,
-      updatedPatient.toMap(),
-      where: 'id = ?',
-      whereArgs: [patient.id],
-    );
-  }
-
-  Future<int> deletePatient(int id) async {
-    final db = await database;
-    return await db.delete(
-      AppConstants.tablePatients,
-      where: 'id = ?',
-      whereArgs: [id],
-    );
   }
 
   // Notifications CRUD

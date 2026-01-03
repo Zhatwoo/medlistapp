@@ -3,16 +3,18 @@ import 'package:medlistapp/models/expiryrecord.dart';
 import 'package:medlistapp/services/databaseservice.dart';
 import 'package:medlistapp/services/notificationservice.dart';
 import 'package:medlistapp/services/medicationservice.dart';
+import 'package:medlistapp/services/stockservice.dart';
 import 'package:medlistapp/utils/constants.dart';
 
 class ExpiryService {
   final DatabaseService _dbService = DatabaseService();
   final NotificationService _notificationService = NotificationService();
   final MedicationService _medicationService = MedicationService();
+  final StockService _stockService = StockService();
 
   // Get expiring medications (within specified days)
   Future<List<StockItem>> getExpiringMedications([int days = 30]) async {
-    final all = await _dbService.getAllStockItems();
+    final all = await _stockService.getAllStockItems();
     final now = DateTime.now();
     
     return all.where((item) {
@@ -23,7 +25,7 @@ class ExpiryService {
 
   // Get expired medications
   Future<List<StockItem>> getExpiredMedications() async {
-    final all = await _dbService.getAllStockItems();
+    final all = await _stockService.getAllStockItems();
     final now = DateTime.now();
     
     return all.where((item) {
@@ -99,8 +101,7 @@ class ExpiryService {
       alertSent: true,
       alertSentAt: DateTime.now(),
     );
-    // Note: We would need an update method in DatabaseService for this
-    // For now, we'll handle it in the next iteration
+    await _dbService.updateExpiryRecord(updated);
   }
 
   // Check and notify about expiring medications

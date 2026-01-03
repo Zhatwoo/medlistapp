@@ -3,6 +3,7 @@ import 'package:medlistapp/screens/dashboard.dart';
 import 'package:medlistapp/screens/medicationlistpage.dart';
 import 'package:medlistapp/screens/expirymanagementpage.dart';
 import 'package:medlistapp/screens/settingspage.dart';
+import 'package:medlistapp/screens/profilesettingspage.dart';
 import 'package:medlistapp/utils/appcolors.dart';
 import 'package:medlistapp/widgets/bluetransitionwidget.dart';
 
@@ -22,7 +23,7 @@ class _MainNavigationState extends State<MainNavigation>
   bool _isTransitioning = false;
 
   final List<Widget> _screens = [
-    const SettingsPage(), // Profile (using Settings for now)
+    const ProfileSettingsPage(), // Profile
     const ExpiryManagementPage(), // Expiry
     const Dashboard(), // Home (active)
     const MedicationListPage(), // Medicine

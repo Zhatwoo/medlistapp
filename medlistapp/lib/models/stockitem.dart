@@ -8,6 +8,7 @@ class StockItem {
   final DateTime? purchaseDate;
   final DateTime? manufacturingDate;
   final int? expectedQuantity;
+  final String? companyCode; // Company code for multi-tenant support
   final DateTime createdAt;
   final DateTime? updatedAt;
 
@@ -21,6 +22,7 @@ class StockItem {
     this.purchaseDate,
     this.manufacturingDate,
     this.expectedQuantity,
+    this.companyCode,
     DateTime? createdAt,
     this.updatedAt,
   }) : createdAt = createdAt ?? DateTime.now();
@@ -37,6 +39,7 @@ class StockItem {
       'purchase_date': purchaseDate?.toIso8601String(),
       'manufacturing_date': manufacturingDate?.toIso8601String(),
       'expected_quantity': expectedQuantity,
+      'company_code': companyCode,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt?.toIso8601String(),
     };
@@ -58,6 +61,7 @@ class StockItem {
           ? DateTime.parse(map['manufacturing_date'] as String)
           : null,
       expectedQuantity: map['expected_quantity'] as int?,
+      companyCode: map['company_code'] as String?,
       createdAt: DateTime.parse(map['created_at'] as String),
       updatedAt: map['updated_at'] != null
           ? DateTime.parse(map['updated_at'] as String)
@@ -113,6 +117,7 @@ class StockItem {
     DateTime? purchaseDate,
     DateTime? manufacturingDate,
     int? expectedQuantity,
+    String? companyCode,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -126,6 +131,7 @@ class StockItem {
       purchaseDate: purchaseDate ?? this.purchaseDate,
       manufacturingDate: manufacturingDate ?? this.manufacturingDate,
       expectedQuantity: expectedQuantity ?? this.expectedQuantity,
+      companyCode: companyCode ?? this.companyCode,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
     );

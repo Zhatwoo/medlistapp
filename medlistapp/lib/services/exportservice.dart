@@ -9,7 +9,6 @@ import 'package:medlistapp/models/exportformat.dart';
 import 'package:medlistapp/services/reportservice.dart';
 import 'package:medlistapp/services/medicationservice.dart';
 import 'package:medlistapp/services/stockservice.dart';
-import 'package:medlistapp/services/patientservice.dart';
 import 'package:medlistapp/services/databaseservice.dart';
 import 'package:intl/intl.dart';
 
@@ -17,7 +16,6 @@ class ExportService {
   final ReportService _reportService = ReportService();
   final MedicationService _medicationService = MedicationService();
   final StockService _stockService = StockService();
-  final PatientService _patientService = PatientService();
   final DatabaseService _dbService = DatabaseService();
 
   // Export report to CSV
@@ -139,16 +137,6 @@ class ExportService {
     for (final item in stockItems) {
       buffer.writeln('${item.id},${item.medicationId},${item.quantity},${item.expiryDate.toIso8601String()},${item.batchNumber ?? ''}');
     }
-    buffer.writeln('');
-
-    // Export patients
-    final patients = await _patientService.getAllPatients();
-    buffer.writeln('=== PATIENTS ===');
-    buffer.writeln('ID,Name,Age,Gender,Weight,Allergies,Conditions');
-    for (final patient in patients) {
-      buffer.writeln('${patient.id},${patient.name},${patient.age},${patient.gender},${patient.weight ?? ''},${patient.allergies.join(';')},${patient.conditions.join(';')}');
-    }
-
     return buffer.toString();
   }
 
@@ -160,7 +148,6 @@ class ExportService {
     // Get all data
     final medications = await _medicationService.getAllMedications();
     final stockItems = await _stockService.getAllStockItems();
-    final patients = await _patientService.getAllPatients();
 
     pdf.addPage(
       pw.MultiPage(
@@ -242,17 +229,6 @@ class ExportService {
             ),
             pw.SizedBox(height: 10),
             pw.Text('Total stock items: ${stockItems.length}'),
-            pw.SizedBox(height: 20),
-            // Patients section
-            pw.Text(
-              'PATIENTS (${patients.length})',
-              style: pw.TextStyle(
-                fontSize: 16,
-                fontWeight: pw.FontWeight.bold,
-              ),
-            ),
-            pw.SizedBox(height: 10),
-            pw.Text('Total patients: ${patients.length}'),
           ];
         },
       ),
@@ -274,7 +250,6 @@ class ExportService {
     // Get all data
     final medications = await _medicationService.getAllMedications();
     final stockItems = await _stockService.getAllStockItems();
-    final patients = await _patientService.getAllPatients();
 
     // Medications sheet
     final medSheet = excel['Medications'];
@@ -303,21 +278,6 @@ class ExportService {
       ]);
     }
 
-    // Patients sheet
-    final patientSheet = excel['Patients'];
-    patientSheet.appendRow(['ID', 'Name', 'Age', 'Gender', 'Weight', 'Allergies', 'Conditions']);
-    for (final patient in patients) {
-      patientSheet.appendRow([
-        patient.id,
-        patient.name,
-        patient.age,
-        patient.gender,
-        patient.weight ?? '',
-        patient.allergies.join('; '),
-        patient.conditions.join('; '),
-      ]);
-    }
-
     // Summary sheet
     final summarySheet = excel['Summary'];
     summarySheet.appendRow(['MedList App - Complete Data Export']);
@@ -325,7 +285,6 @@ class ExportService {
     summarySheet.appendRow([]);
     summarySheet.appendRow(['Total Medications', medications.length]);
     summarySheet.appendRow(['Total Stock Items', stockItems.length]);
-    summarySheet.appendRow(['Total Patients', patients.length]);
 
     final directory = await getApplicationDocumentsDirectory();
     final fileName = 'MedList_Complete_Export_${DateTime.now().millisecondsSinceEpoch}.xlsx';
@@ -432,11 +391,71 @@ class ExportService {
           pw.Text('Low Stock Items: ${report.data['low_stock_count'] ?? 0}'),
         ];
 
+      case ReportType.stockMovement:
+        return [
+          pw.Text(
+            'Stock Movement Summary',
+            style: pw.TextStyle(
+              fontSize: 14,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+          pw.SizedBox(height: 10),
+          pw.Text('Total Adjustments: ${report.data['total_adjustments'] ?? 0}'),
+          pw.Text('Total Increase: ${report.data['total_increase'] ?? 0}'),
+          pw.Text('Total Decrease: ${report.data['total_decrease'] ?? 0}'),
+          pw.SizedBox(height: 20),
+          if (report.data['adjustments_by_reason'] != null)
+            ..._buildStockMovementTable(report.data['adjustments_by_reason'] as Map<String, dynamic>),
+        ];
+
       default:
         return [
           pw.Text('Report Data: ${report.data}'),
         ];
     }
+  }
+
+  List<pw.Widget> _buildStockMovementTable(Map<String, dynamic> adjustmentsByReason) {
+    return [
+      pw.Text(
+        'Adjustments by Reason',
+        style: pw.TextStyle(
+          fontSize: 12,
+          fontWeight: pw.FontWeight.bold,
+        ),
+      ),
+      pw.SizedBox(height: 10),
+      pw.Table(
+        border: pw.TableBorder.all(),
+        children: [
+          pw.TableRow(
+            children: [
+              pw.Padding(
+                padding: const pw.EdgeInsets.all(4),
+                child: pw.Text('Reason', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+              ),
+              pw.Padding(
+                padding: const pw.EdgeInsets.all(4),
+                child: pw.Text('Count', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+              ),
+            ],
+          ),
+          ...adjustmentsByReason.entries.map((entry) => pw.TableRow(
+            children: [
+              pw.Padding(
+                padding: const pw.EdgeInsets.all(4),
+                child: pw.Text(entry.key),
+              ),
+              pw.Padding(
+                padding: const pw.EdgeInsets.all(4),
+                child: pw.Text(entry.value.toString()),
+              ),
+            ],
+          )),
+        ],
+      ),
+    ];
   }
 
   List<pw.Widget> _buildExpiryTable(String title, List<Map<String, dynamic>> items) {
@@ -531,6 +550,22 @@ class ExportService {
         sheet.appendRow(['Low Stock Items', report.data['low_stock_count'] ?? 0]);
         break;
 
+      case ReportType.stockMovement:
+        sheet.appendRow(['Stock Movement Summary']);
+        sheet.appendRow(['Total Adjustments', report.data['total_adjustments'] ?? 0]);
+        sheet.appendRow(['Total Increase', report.data['total_increase'] ?? 0]);
+        sheet.appendRow(['Total Decrease', report.data['total_decrease'] ?? 0]);
+        sheet.appendRow([]);
+        if (report.data['adjustments_by_reason'] != null) {
+          sheet.appendRow(['Adjustments by Reason']);
+          sheet.appendRow(['Reason', 'Count']);
+          final adjustmentsByReason = report.data['adjustments_by_reason'] as Map<String, dynamic>;
+          for (final entry in adjustmentsByReason.entries) {
+            sheet.appendRow([entry.key, entry.value]);
+          }
+        }
+        break;
+
       default:
         sheet.appendRow(['Report Data']);
         sheet.appendRow([report.data.toString()]);
@@ -543,6 +578,8 @@ class ExportService {
         return 'Expiry Report';
       case ReportType.stock:
         return 'Stock Report';
+      case ReportType.stockMovement:
+        return 'Stock Movement Report';
       case ReportType.verification:
         return 'Verification Report';
       case ReportType.mimsAccess:

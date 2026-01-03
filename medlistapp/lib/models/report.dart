@@ -1,6 +1,7 @@
 enum ReportType {
   expiry,
   stock,
+  stockMovement,
   verification,
   mimsAccess,
   audit,

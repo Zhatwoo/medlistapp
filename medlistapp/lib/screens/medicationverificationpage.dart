@@ -5,6 +5,7 @@ import 'package:medlistapp/services/medicationservice.dart';
 import 'package:medlistapp/services/verificationservice.dart';
 import 'package:medlistapp/utils/appcolors.dart';
 import 'package:medlistapp/widgets/searchbarwidget.dart';
+import 'package:medlistapp/widgets/clinicaldisclaimerwidget.dart';
 import 'package:medlistapp/screens/medicationdetailpage.dart';
 import 'package:medlistapp/screens/barcodescannerpage.dart';
 
@@ -110,8 +111,9 @@ class _MedicationVerificationPageState extends State<MedicationVerificationPage>
       ),
       body: Column(
         children: [
+          const ClinicalDisclaimerWidget(compact: true),
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: SearchBarWidget(
               controller: _searchController,
               hintText: 'Search by trade name, ingredient, or company...',
