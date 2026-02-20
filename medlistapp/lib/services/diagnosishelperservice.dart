@@ -1,3 +1,4 @@
+import 'package:medlistapp/models/druginteraction.dart';
 import 'package:medlistapp/models/medication.dart';
 import 'package:medlistapp/models/mimsdrugdata.dart';
 import 'package:medlistapp/services/medicationservice.dart';

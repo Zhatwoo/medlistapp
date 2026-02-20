@@ -265,7 +265,76 @@ class NotificationService {
     await _dbService.insertNotification(notification);
   }
 
-  // Schedule daily check notification
+  /// Show a medication-related notification (e.g. contraindication found).
+  Future<void> showMedicationAlert({
+    required String title,
+    required String body,
+    Map<String, dynamic>? data,
+  }) async {
+    const androidDetails = AndroidNotificationDetails(
+      AppConstants.systemAlertChannelId,
+      AppConstants.systemAlertChannelName,
+      channelDescription: 'Medication-related alerts',
+      importance: Importance.high,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+    );
+
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+
+    const details = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
+
+    await _notifications.show(
+      DateTime.now().millisecondsSinceEpoch % 100000 + 300000,
+      title,
+      body,
+      details,
+      payload: data != null ? data.toString() : null,
+    );
+
+    final notification = AppNotification(
+      type: NotificationType.system,
+      title: title,
+      body: body,
+      data: data,
+      sentAt: DateTime.now(),
+    );
+    await _dbService.insertNotification(notification);
+  }
+
+  /// Get count of unread notifications.
+  Future<int> getUnreadCount() async {
+    try {
+      return await _dbService.getUnreadNotificationCount();
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<void> markAllAsRead() async {
+    await _dbService.markAllNotificationsAsRead();
+  }
+
+  Future<void> markAsReadByCategory(String category) async {
+    await _dbService.markNotificationsAsReadByCategory(category);
+  }
+
+  Future<int> getUnreadCountByCategory(String category) async {
+    try {
+      return await _dbService.getUnreadCountByCategory(category);
+    } catch (_) {
+      return 0;
+    }
+  }
+
   Future<void> scheduleDailyCheck(DateTime scheduledTime) async {
     const androidDetails = AndroidNotificationDetails(
       AppConstants.systemAlertChannelId,

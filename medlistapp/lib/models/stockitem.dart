@@ -9,6 +9,7 @@ class StockItem {
   final DateTime? manufacturingDate;
   final int? expectedQuantity;
   final String? companyCode; // Company code for multi-tenant support
+  final String? serialNumber; // GS1 serial number (AI 21)
   final DateTime createdAt;
   final DateTime? updatedAt;
 
@@ -23,6 +24,7 @@ class StockItem {
     this.manufacturingDate,
     this.expectedQuantity,
     this.companyCode,
+    this.serialNumber,
     DateTime? createdAt,
     this.updatedAt,
   }) : createdAt = createdAt ?? DateTime.now();
@@ -40,9 +42,30 @@ class StockItem {
       'manufacturing_date': manufacturingDate?.toIso8601String(),
       'expected_quantity': expectedQuantity,
       'company_code': companyCode,
+      'serial_number': serialNumber,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt?.toIso8601String(),
     };
+  }
+
+  /// Parses expiry_date from DB - supports ISO8601 and date-only formats.
+  /// Returns far-future fallback on parse failure so item loads but won't trigger expiry alerts.
+  static DateTime _parseExpiryDate(dynamic value) {
+    if (value is String && value.trim().isNotEmpty) {
+      final s = value.trim();
+      final parsed = DateTime.tryParse(s);
+      if (parsed != null) return parsed;
+      final parts = s.split(RegExp(r'[\sT\-/:]'));
+      if (parts.length >= 3) {
+        final y = int.tryParse(parts[0]);
+        final m = int.tryParse(parts[1]);
+        final d = int.tryParse(parts[2]);
+        if (y != null && m != null && d != null && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+          return DateTime(y, m, d);
+        }
+      }
+    }
+    return DateTime(2099, 12, 31);
   }
 
   // Create from Map (database)
@@ -51,7 +74,7 @@ class StockItem {
       id: map['id'] as int?,
       medicationId: map['medication_id'] as int,
       quantity: map['quantity'] as int,
-      expiryDate: DateTime.parse(map['expiry_date'] as String),
+      expiryDate: _parseExpiryDate(map['expiry_date']),
       batchNumber: map['batch_number'] as String?,
       location: map['location'] as String?,
       purchaseDate: map['purchase_date'] != null
@@ -62,6 +85,7 @@ class StockItem {
           : null,
       expectedQuantity: map['expected_quantity'] as int?,
       companyCode: map['company_code'] as String?,
+      serialNumber: map['serial_number'] as String?,
       createdAt: DateTime.parse(map['created_at'] as String),
       updatedAt: map['updated_at'] != null
           ? DateTime.parse(map['updated_at'] as String)
@@ -75,11 +99,12 @@ class StockItem {
   // Create from JSON
   factory StockItem.fromJson(Map<String, dynamic> json) => StockItem.fromMap(json);
 
-  // Calculate days until expiry
+  // Calculate days until expiry (date-only: product valid through end of expiry day)
   int get daysUntilExpiry {
     final now = DateTime.now();
-    final difference = expiryDate.difference(now);
-    return difference.inDays;
+    final today = DateTime(now.year, now.month, now.day);
+    final expiryDay = DateTime(expiryDate.year, expiryDate.month, expiryDate.day);
+    return expiryDay.difference(today).inDays;
   }
 
   // Check if expired
@@ -118,6 +143,7 @@ class StockItem {
     DateTime? manufacturingDate,
     int? expectedQuantity,
     String? companyCode,
+    String? serialNumber,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -132,6 +158,7 @@ class StockItem {
       manufacturingDate: manufacturingDate ?? this.manufacturingDate,
       expectedQuantity: expectedQuantity ?? this.expectedQuantity,
       companyCode: companyCode ?? this.companyCode,
+      serialNumber: serialNumber ?? this.serialNumber,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
     );

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:medlistapp/models/medication.dart';
+import 'package:medlistapp/models/mimsdrugdata.dart';
 import 'package:medlistapp/models/stockitem.dart';
 import 'package:medlistapp/services/medicationservice.dart';
+import 'package:medlistapp/services/mimsservice.dart';
 import 'package:medlistapp/services/stockservice.dart';
 import 'package:medlistapp/utils/appcolors.dart';
 import 'package:medlistapp/widgets/stockstatusindicator.dart';
@@ -20,11 +22,15 @@ class MedicationDetailPage extends StatefulWidget {
 class _MedicationDetailPageState extends State<MedicationDetailPage> {
   final MedicationService _medicationService = MedicationService();
   final StockService _stockService = StockService();
+  final MimsService _mimsService = MimsService();
   
   Medication? _medication;
   List<StockItem> _stockItems = [];
   int _totalStock = 0;
   bool _isLoading = true;
+  MimsDrugData? _mimsData;
+  bool _mimsLoading = false;
+  String? _mimsError;
 
   @override
   void initState() {
@@ -45,6 +51,7 @@ class _MedicationDetailPageState extends State<MedicationDetailPage> {
         _totalStock = totalStock;
         _isLoading = false;
       });
+      _loadMimsData();
     } catch (e) {
       setState(() => _isLoading = false);
       if (mounted) {
@@ -52,6 +59,26 @@ class _MedicationDetailPageState extends State<MedicationDetailPage> {
           SnackBar(content: Text('Error loading medication: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _loadMimsData() async {
+    if (_medication == null) return;
+    setState(() {
+      _mimsLoading = true;
+      _mimsError = null;
+    });
+    try {
+      final results = await _mimsService.searchDrug(_medication!.tradeName);
+      if (results.isNotEmpty) {
+        if (mounted) setState(() => _mimsData = results.first);
+      } else {
+        if (mounted) setState(() => _mimsError = 'No MIMS data found for this medication.');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _mimsError = 'Unable to load MIMS data.');
+    } finally {
+      if (mounted) setState(() => _mimsLoading = false);
     }
   }
 
@@ -465,53 +492,157 @@ class _MedicationDetailPageState extends State<MedicationDetailPage> {
   }
 
   Widget _buildMedicalTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Card(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+    if (_mimsLoading) {
+      return const Center(
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(48),
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+    if (_mimsError != null && _mimsData == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                'Medical Information',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
+              Icon(Icons.info_outline, size: 48, color: AppColors.mediumGray),
               const SizedBox(height: 16),
-              Text(
-                'Indications',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Information from MIMS will be displayed here when integrated.',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 24),
-              Text(
-                'Contraindications',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Information from MIMS will be displayed here when integrated.',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 24),
-              Text(
-                'Dosage',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Information from MIMS will be displayed here when integrated.',
-                style: Theme.of(context).textTheme.bodyMedium,
+              Text(_mimsError!, textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _loadMimsData,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
               ),
             ],
           ),
+        ),
+      );
+    }
+    final d = _mimsData;
+    if (d == null) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: Text('No MIMS data available.'),
+        ),
+      );
+    }
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(d.drugName, style: Theme.of(context).textTheme.titleLarge),
+                  if (d.genericName != null && d.genericName!.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(d.genericName!, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.mediumGray)),
+                  ],
+                  if (d.therapeuticClass != null && d.therapeuticClass!.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Chip(label: Text(d.therapeuticClass!, style: const TextStyle(fontSize: 12)), backgroundColor: AppColors.softBlue),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          if (d.indications != null && d.indications!.isNotEmpty)
+            _buildMimsSection('Indications', d.indications!, Icons.check_circle_outline, AppColors.successGreen),
+          if (d.contraindications != null && d.contraindications!.isNotEmpty)
+            _buildMimsSection('Contraindications', d.contraindications!, Icons.block, AppColors.errorRed),
+          if (d.dosage != null && d.dosage!.isNotEmpty)
+            _buildMimsTextSection('Dosage', d.dosage!, Icons.medication_outlined),
+          if (d.precautions != null && d.precautions!.isNotEmpty)
+            _buildMimsTextSection('Warnings / Precautions', d.precautions!, Icons.warning_amber),
+          if (d.sideEffects != null && d.sideEffects!.isNotEmpty)
+            _buildMimsSection('Side Effects', d.sideEffects!, Icons.report_problem_outlined, AppColors.warningOrange),
+          if (d.interactions != null && d.interactions!.isNotEmpty)
+            _buildMimsTextSection(
+              'Interactions',
+              d.interactions!.entries.map((e) => '${e.key}: ${e.value}').join('\n'),
+              Icons.compare_arrows,
+            ),
+          if (d.administration != null && d.administration!.isNotEmpty)
+            _buildMimsTextSection('Administration', d.administration!, Icons.local_hospital),
+          if (d.storage != null && d.storage!.isNotEmpty)
+            _buildMimsTextSection('Storage', d.storage!, Icons.inventory_2),
+          const SizedBox(height: 16),
+          Center(
+            child: Text(
+              'Source: MIMS',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.mediumGray,
+                    fontStyle: FontStyle.italic,
+                  ),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMimsSection(String title, List<String> items, IconData icon, Color color) {
+    return Card(
+      margin: const EdgeInsets.only(top: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: color, size: 20),
+                const SizedBox(width: 8),
+                Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ...items.map((item) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('• ', style: TextStyle(fontWeight: FontWeight.bold)),
+                  Expanded(child: Text(item, style: Theme.of(context).textTheme.bodyMedium)),
+                ],
+              ),
+            )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMimsTextSection(String title, String text, IconData icon) {
+    return Card(
+      margin: const EdgeInsets.only(top: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: AppColors.skyBlue, size: 20),
+                const SizedBox(width: 8),
+                Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(text, style: Theme.of(context).textTheme.bodyMedium),
+          ],
         ),
       ),
     );

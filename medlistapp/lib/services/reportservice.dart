@@ -51,20 +51,42 @@ class ReportService {
     return report;
   }
 
-  // Generate stock report
+  // Generate stock report (includes Brand, Supplier, Expiry, Batch, Generic, Quantity)
   Future<Report> generateStockReport(DateTime startDate, DateTime endDate) async {
     final stockItems = await _stockService.getAllStockItems();
     final lowStockItems = await _stockService.getLowStockItems(10);
+
+    final stockDetails = <Map<String, dynamic>>[];
+    for (final item in stockItems) {
+      final medication = await _medicationService.getMedicationById(item.medicationId);
+      stockDetails.add({
+        'brand': medication?.tradeName ?? 'Unknown',
+        'supplier': medication?.supplier ?? medication?.company ?? '',
+        'expiry': item.expiryDate.toIso8601String(),
+        'batch': item.batchNumber ?? '',
+        'generic': medication?.activeIngredient ?? '',
+        'quantity': item.quantity,
+      });
+    }
+
+    final lowStockDetails = <Map<String, dynamic>>[];
+    for (final item in lowStockItems) {
+      final medication = await _medicationService.getMedicationById(item.medicationId);
+      lowStockDetails.add({
+        'id': item.id,
+        'medication_id': item.medicationId,
+        'brand': medication?.tradeName ?? 'Unknown',
+        'supplier': medication?.supplier ?? medication?.company ?? '',
+        'quantity': item.quantity,
+      });
+    }
 
     final data = {
       'total_stock_items': stockItems.length,
       'total_quantity': stockItems.fold<int>(0, (sum, item) => sum + item.quantity),
       'low_stock_count': lowStockItems.length,
-      'low_stock_items': lowStockItems.map((item) => {
-        'id': item.id,
-        'medication_id': item.medicationId,
-        'quantity': item.quantity,
-      }).toList(),
+      'low_stock_items': lowStockDetails,
+      'stock_details': stockDetails,
     };
 
     final report = Report(
@@ -166,8 +188,8 @@ class ReportService {
     }
 
     // Calculate totals
-    int totalIncrease = 0;
-    int totalDecrease = 0;
+    num totalIncrease = 0;
+    num totalDecrease = 0;
     for (final adj in filteredAdjustments) {
       final diff = adj.quantityDifference;
       if (diff > 0) {

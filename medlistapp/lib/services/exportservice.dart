@@ -1,594 +1,700 @@
-import 'dart:io';
+import 'dart:typed_data';
+import 'package:intl/intl.dart';
+import 'package:medlistapp/models/report.dart';
+import 'package:medlistapp/models/exportformat.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:excel/excel.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
-import 'package:medlistapp/models/report.dart';
-import 'package:medlistapp/models/exportformat.dart';
-import 'package:medlistapp/services/reportservice.dart';
-import 'package:medlistapp/services/medicationservice.dart';
-import 'package:medlistapp/services/stockservice.dart';
-import 'package:medlistapp/services/databaseservice.dart';
-import 'package:intl/intl.dart';
 
 class ExportService {
-  final ReportService _reportService = ReportService();
-  final MedicationService _medicationService = MedicationService();
-  final StockService _stockService = StockService();
-  final DatabaseService _dbService = DatabaseService();
+  static final _dateFormat = DateFormat('yyyy-MM-dd HH:mm:ss');
 
-  // Export report to CSV
+  /// Export report to CSV string (for Share.share with text)
   Future<String> exportToCSV(Report report) async {
-    return _reportService.exportToCSV(report);
-  }
-
-  // Export report to PDF
-  Future<File> exportToPDF(Report report) async {
-    final pdf = pw.Document();
-    final dateFormat = DateFormat('MMM dd, yyyy');
-    final dateTimeFormat = DateFormat('yyyy-MM-dd HH:mm:ss');
-
-    // Get detailed data for the report
-    final detailedData = await _getDetailedReportData(report);
-
-    pdf.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(40),
-        build: (pw.Context context) {
-          return [
-            // Header
-            pw.Header(
-              level: 0,
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    report.title,
-                    style: pw.TextStyle(
-                      fontSize: 20,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                  pw.Text(
-                    dateTimeFormat.format(report.generatedAt),
-                    style: const pw.TextStyle(fontSize: 10),
-                  ),
-                ],
-              ),
-            ),
-            pw.SizedBox(height: 20),
-            // Date range
-            pw.Text(
-              'Period: ${dateFormat.format(report.startDate)} - ${dateFormat.format(report.endDate)}',
-              style: const pw.TextStyle(fontSize: 12),
-            ),
-            pw.SizedBox(height: 20),
-            // Report content based on type
-            ..._buildPDFContent(report, detailedData),
-          ];
-        },
-      ),
-    );
-
-    // Save PDF to file
-    final directory = await getApplicationDocumentsDirectory();
-    final fileName = '${report.title.replaceAll(' ', '_')}_${DateTime.now().millisecondsSinceEpoch}.pdf';
-    final file = File('${directory.path}/$fileName');
-    await file.writeAsBytes(await pdf.save());
-
-    return file;
-  }
-
-  // Export report to Excel
-  Future<File> exportToExcel(Report report) async {
-    final excel = Excel.createExcel();
-    excel.delete('Sheet1'); // Delete default sheet
-
-    // Get detailed data for the report
-    final detailedData = await _getDetailedReportData(report);
-
-    // Create sheet with report name
-    final sheetName = _getSheetName(report.type);
-    final sheet = excel[sheetName];
-
-    // Add header
-    sheet.appendRow([report.title]);
-    sheet.appendRow(['Generated: ${DateFormat('yyyy-MM-dd HH:mm:ss').format(report.generatedAt)}']);
-    sheet.appendRow(['Period: ${DateFormat('MMM dd, yyyy').format(report.startDate)} - ${DateFormat('MMM dd, yyyy').format(report.endDate)}']);
-    sheet.appendRow([]); // Empty row
-
-    // Add content based on report type
-    _buildExcelContent(sheet, report, detailedData);
-
-    // Save Excel file
-    final directory = await getApplicationDocumentsDirectory();
-    final fileName = '${report.title.replaceAll(' ', '_')}_${DateTime.now().millisecondsSinceEpoch}.xlsx';
-    final file = File('${directory.path}/$fileName');
-    final excelBytes = excel.save();
-    if (excelBytes != null) {
-      await file.writeAsBytes(excelBytes);
-    }
-
-    return file;
-  }
-
-  // Export all data to CSV
-  Future<String> exportAllDataToCSV() async {
     final buffer = StringBuffer();
-    buffer.writeln('MedList App - Complete Data Export');
-    buffer.writeln('Generated: ${DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now())}');
-    buffer.writeln('');
+    buffer.writeln(report.title);
+    buffer.writeln('Generated: ${_dateFormat.format(report.generatedAt)}');
+    buffer.writeln('Period: ${DateFormat('MMM dd, yyyy').format(report.startDate)} - ${DateFormat('MMM dd, yyyy').format(report.endDate)}');
+    buffer.writeln();
 
-    // Export medications
-    final medications = await _medicationService.getAllMedications();
-    buffer.writeln('=== MEDICATIONS ===');
-    buffer.writeln('ID,Trade Name,Active Ingredient,Form,Strength,Company');
-    for (final med in medications) {
-      buffer.writeln('${med.id},${med.tradeName},${med.activeIngredient},${med.form},${med.strength},${med.company}');
+    switch (report.type) {
+      case ReportType.expiry:
+        buffer.writeln('Metric,Value');
+        buffer.writeln('Expiring Items,${report.data['expiring_count'] ?? 0}');
+        buffer.writeln('Expired Items,${report.data['expired_count'] ?? 0}');
+        _addExpiryItemsToCsv(buffer, report.data);
+        break;
+      case ReportType.stock:
+        buffer.writeln('Metric,Value');
+        buffer.writeln('Total Stock Items,${report.data['total_stock_items'] ?? 0}');
+        buffer.writeln('Total Quantity,${report.data['total_quantity'] ?? 0}');
+        buffer.writeln('Low Stock Items,${report.data['low_stock_count'] ?? 0}');
+        _addStockDetailsToCsv(buffer, report.data);
+        _addStockItemsToCsv(buffer, report.data);
+        break;
+      case ReportType.stockMovement:
+        buffer.writeln('Metric,Value');
+        buffer.writeln('Total Adjustments,${report.data['total_adjustments'] ?? 0}');
+        buffer.writeln('Total Increase,${report.data['total_increase'] ?? 0}');
+        buffer.writeln('Total Decrease,${report.data['total_decrease'] ?? 0}');
+        _addStockMovementToCsv(buffer, report.data);
+        break;
+      case ReportType.verification:
+        buffer.writeln('Metric,Value');
+        buffer.writeln('Total Verifications,${report.data['total_verifications'] ?? 0}');
+        buffer.writeln('Verified,${report.data['verified_count'] ?? 0}');
+        _addVerificationsToCsv(buffer, report.data);
+        break;
+      case ReportType.mimsAccess:
+        buffer.writeln('Metric,Value');
+        buffer.writeln('Total Accesses,${report.data['total_accesses'] ?? 0}');
+        _addMimsAccessToCsv(buffer, report.data);
+        break;
+      case ReportType.audit:
+        buffer.writeln('Metric,Value');
+        buffer.writeln('Total Actions,${report.data['total_actions'] ?? 0}');
+        _addAuditToCsv(buffer, report.data);
+        break;
+      default:
+        buffer.writeln('Data,${report.data}');
     }
-    buffer.writeln('');
 
-    // Export stock items
-    final stockItems = await _stockService.getAllStockItems();
-    buffer.writeln('=== STOCK ITEMS ===');
-    buffer.writeln('ID,Medication ID,Quantity,Expiry Date,Batch Number');
-    for (final item in stockItems) {
-      buffer.writeln('${item.id},${item.medicationId},${item.quantity},${item.expiryDate.toIso8601String()},${item.batchNumber ?? ''}');
-    }
     return buffer.toString();
   }
 
-  // Export all data to PDF
-  Future<File> exportAllDataToPDF() async {
-    final pdf = pw.Document();
-    final dateTimeFormat = DateFormat('yyyy-MM-dd HH:mm:ss');
+  void _addExpiryItemsToCsv(StringBuffer buffer, Map<String, dynamic> data) {
+    final items = data['expired_items'] as List? ?? [];
+    if (items.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('Expired Items Detail');
+      buffer.writeln('ID,Medication ID,Quantity,Expiry Date');
+      for (final item in items) {
+        final m = item as Map;
+        buffer.writeln('${m['id']},${m['medication_id']},${m['quantity']},${m['expiry_date']}');
+      }
+    }
+  }
 
-    // Get all data
-    final medications = await _medicationService.getAllMedications();
-    final stockItems = await _stockService.getAllStockItems();
+  void _addStockDetailsToCsv(StringBuffer buffer, Map<String, dynamic> data) {
+    final items = data['stock_details'] as List? ?? [];
+    if (items.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('Stock Detail - Brand,Supplier,Generic,Quantity,Expiry,Batch');
+      for (final item in items) {
+        final m = item as Map;
+        buffer.writeln('"${m['brand'] ?? ''}","${m['supplier'] ?? ''}","${m['generic'] ?? ''}",${m['quantity']},${m['expiry']},"${m['batch'] ?? ''}"');
+      }
+    }
+  }
+
+  void _addStockItemsToCsv(StringBuffer buffer, Map<String, dynamic> data) {
+    final items = data['low_stock_items'] as List? ?? [];
+    if (items.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('Low Stock Detail');
+      buffer.writeln('ID,Medication ID,Quantity');
+      for (final item in items) {
+        final m = item as Map;
+        buffer.writeln('${m['id']},${m['medication_id']},${m['quantity']}');
+      }
+    }
+  }
+
+  void _addStockMovementToCsv(StringBuffer buffer, Map<String, dynamic> data) {
+    final items = data['adjustments'] as List? ?? [];
+    if (items.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('Medication,Old Qty,New Qty,Difference,Reason,Date');
+      for (final item in items) {
+        final m = item as Map;
+        buffer.writeln('"${m['medication_name'] ?? ''}",${m['old_quantity']},${m['new_quantity']},${m['quantity_difference']},${m['reason']},${m['adjusted_at']}');
+      }
+    }
+  }
+
+  void _addVerificationsToCsv(StringBuffer buffer, Map<String, dynamic> data) {
+    final items = data['verifications'] as List? ?? [];
+    if (items.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('Medication,Verified,Contraindication,Interaction,Date');
+      for (final item in items) {
+        final m = item as Map;
+        buffer.writeln('"${m['medication_name'] ?? ''}",${m['identity_verified']},${m['contraindication_found']},${m['interaction_found']},${m['verified_at']}');
+      }
+    }
+  }
+
+  void _addMimsAccessToCsv(StringBuffer buffer, Map<String, dynamic> data) {
+    final items = data['accesses'] as List? ?? [];
+    if (items.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('Drug Name,Success,Timestamp');
+      for (final item in items) {
+        final m = item as Map;
+        buffer.writeln('"${m['drug_name'] ?? ''}",${m['success']},${m['timestamp']}');
+      }
+    }
+  }
+
+  void _addAuditToCsv(StringBuffer buffer, Map<String, dynamic> data) {
+    final items = data['actions'] as List? ?? [];
+    if (items.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('Action Type,Entity Type,Description,Timestamp');
+      for (final item in items) {
+        final m = item as Map;
+        buffer.writeln('"${m['action_type'] ?? ''}","${m['entity_type'] ?? ''}","${m['description'] ?? ''}",${m['timestamp']}');
+      }
+    }
+  }
+
+  /// Export report to PDF bytes
+  Future<Uint8List> exportToPDF(Report report) async {
+    final pdf = pw.Document();
+    final rows = <List<String>>[];
+
+    switch (report.type) {
+      case ReportType.expiry:
+        rows.addAll([
+          ['Metric', 'Value'],
+          ['Expiring Items', '${report.data['expiring_count'] ?? 0}'],
+          ['Expired Items', '${report.data['expired_count'] ?? 0}'],
+        ]);
+        _addExpiryRows(rows, report.data);
+        break;
+      case ReportType.stock:
+        rows.addAll([
+          ['Metric', 'Value'],
+          ['Total Stock Items', '${report.data['total_stock_items'] ?? 0}'],
+          ['Total Quantity', '${report.data['total_quantity'] ?? 0}'],
+          ['Low Stock Items', '${report.data['low_stock_count'] ?? 0}'],
+        ]);
+        _addStockDetailsRows(rows, report.data);
+        _addStockRows(rows, report.data);
+        break;
+      case ReportType.stockMovement:
+        rows.addAll([
+          ['Metric', 'Value'],
+          ['Total Adjustments', '${report.data['total_adjustments'] ?? 0}'],
+          ['Total Increase', '${report.data['total_increase'] ?? 0}'],
+          ['Total Decrease', '${report.data['total_decrease'] ?? 0}'],
+        ]);
+        _addStockMovementRows(rows, report.data);
+        break;
+      case ReportType.verification:
+        rows.addAll([
+          ['Metric', 'Value'],
+          ['Total Verifications', '${report.data['total_verifications'] ?? 0}'],
+          ['Verified', '${report.data['verified_count'] ?? 0}'],
+        ]);
+        _addVerificationRows(rows, report.data);
+        break;
+      case ReportType.mimsAccess:
+        rows.addAll([
+          ['Total Accesses', '${report.data['total_accesses'] ?? 0}'],
+        ]);
+        _addMimsRows(rows, report.data);
+        break;
+      case ReportType.audit:
+        rows.addAll([
+          ['Total Actions', '${report.data['total_actions'] ?? 0}'],
+        ]);
+        _addAuditRows(rows, report.data);
+        break;
+      default:
+        rows.add(['Report', report.title]);
+    }
 
     pdf.addPage(
       pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(40),
-        build: (pw.Context context) {
-          return [
-            pw.Header(
-              level: 0,
-              child: pw.Text(
-                'MedList App - Complete Data Export',
-                style: pw.TextStyle(
-                  fontSize: 20,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
+        build: (context) => [
+          pw.Header(
+            level: 0,
+            child: pw.Text(
+              report.title,
+              style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
             ),
-            pw.Text(
-              'Generated: ${dateTimeFormat.format(DateTime.now())}',
-              style: const pw.TextStyle(fontSize: 10),
-            ),
-            pw.SizedBox(height: 30),
-            // Medications section
-            pw.Text(
-              'MEDICATIONS (${medications.length})',
-              style: pw.TextStyle(
-                fontSize: 16,
-                fontWeight: pw.FontWeight.bold,
-              ),
-            ),
-            pw.SizedBox(height: 10),
-            pw.Table(
-              border: pw.TableBorder.all(),
-              children: [
-                pw.TableRow(
-                  children: [
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(4),
-                      child: pw.Text('Trade Name', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(4),
-                      child: pw.Text('Active Ingredient', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(4),
-                      child: pw.Text('Form', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                    ),
-                  ],
-                ),
-                ...medications.take(50).map((med) => pw.TableRow(
-                  children: [
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(4),
-                      child: pw.Text(med.tradeName),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(4),
-                      child: pw.Text(med.activeIngredient),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(4),
-                      child: pw.Text(med.form),
-                    ),
-                  ],
-                )),
-              ],
-            ),
-            if (medications.length > 50)
-              pw.Text('... and ${medications.length - 50} more medications'),
-            pw.SizedBox(height: 20),
-            // Stock items section
-            pw.Text(
-              'STOCK ITEMS (${stockItems.length})',
-              style: pw.TextStyle(
-                fontSize: 16,
-                fontWeight: pw.FontWeight.bold,
-              ),
-            ),
-            pw.SizedBox(height: 10),
-            pw.Text('Total stock items: ${stockItems.length}'),
-          ];
-        },
+          ),
+          pw.Text('Generated: ${_dateFormat.format(report.generatedAt)}'),
+          pw.SizedBox(height: 20),
+          pw.Table(
+            border: pw.TableBorder.all(color: PdfColors.grey400),
+            children: rows.map((row) => pw.TableRow(
+              children: row.map((cell) => pw.Padding(
+                padding: const pw.EdgeInsets.all(4),
+                child: pw.Text(cell, style: const pw.TextStyle(fontSize: 10)),
+              )).toList(),
+            )).toList(),
+          ),
+        ],
       ),
     );
 
-    final directory = await getApplicationDocumentsDirectory();
-    final fileName = 'MedList_Complete_Export_${DateTime.now().millisecondsSinceEpoch}.pdf';
-    final file = File('${directory.path}/$fileName');
-    await file.writeAsBytes(await pdf.save());
-
-    return file;
+    return pdf.save();
   }
 
-  // Export all data to Excel
-  Future<File> exportAllDataToExcel() async {
+  void _addExpiryRows(List<List<String>> rows, Map<String, dynamic> data) {
+    final items = data['expired_items'] as List? ?? [];
+    if (items.isNotEmpty) {
+      rows.add([]);
+      rows.add(['ID', 'Medication ID', 'Quantity', 'Expiry Date']);
+      for (final item in items) {
+        final m = item as Map;
+        rows.add(['${m['id']}', '${m['medication_id']}', '${m['quantity']}', '${m['expiry_date']}']);
+      }
+    }
+  }
+
+  void _addStockDetailsRows(List<List<String>> rows, Map<String, dynamic> data) {
+    final items = data['stock_details'] as List? ?? [];
+    if (items.isEmpty) return;
+    rows.add([]);
+    rows.add(['Brand', 'Supplier', 'Generic', 'Quantity', 'Expiry', 'Batch']);
+    for (final item in items) {
+      final m = item as Map;
+      rows.add([
+        '${m['brand'] ?? ''}',
+        '${m['supplier'] ?? ''}',
+        '${m['generic'] ?? ''}',
+        '${m['quantity']}',
+        '${m['expiry']}',
+        '${m['batch'] ?? ''}',
+      ]);
+    }
+  }
+
+  void _addStockRows(List<List<String>> rows, Map<String, dynamic> data) {
+    final items = data['low_stock_items'] as List? ?? [];
+    if (items.isNotEmpty) {
+      rows.add([]);
+      rows.add(['ID', 'Medication ID', 'Quantity']);
+      for (final item in items) {
+        final m = item as Map;
+        rows.add(['${m['id']}', '${m['medication_id']}', '${m['quantity']}']);
+      }
+    }
+  }
+
+  void _addStockMovementRows(List<List<String>> rows, Map<String, dynamic> data) {
+    final items = data['adjustments'] as List? ?? [];
+    if (items.isNotEmpty) {
+      rows.add([]);
+      rows.add(['Medication', 'Old', 'New', 'Diff', 'Reason', 'Date']);
+      for (final item in items) {
+        final m = item as Map;
+        rows.add([
+          '${m['medication_name'] ?? ''}',
+          '${m['old_quantity']}',
+          '${m['new_quantity']}',
+          '${m['quantity_difference']}',
+          '${m['reason']}',
+          '${m['adjusted_at']}',
+        ]);
+      }
+    }
+  }
+
+  void _addVerificationRows(List<List<String>> rows, Map<String, dynamic> data) {
+    final items = data['verifications'] as List? ?? [];
+    if (items.isNotEmpty) {
+      rows.add([]);
+      rows.add(['Medication', 'Verified', 'Contraindication', 'Interaction', 'Date']);
+      for (final item in items) {
+        final m = item as Map;
+        rows.add([
+          '${m['medication_name'] ?? ''}',
+          '${m['identity_verified']}',
+          '${m['contraindication_found']}',
+          '${m['interaction_found']}',
+          '${m['verified_at']}',
+        ]);
+      }
+    }
+  }
+
+  void _addMimsRows(List<List<String>> rows, Map<String, dynamic> data) {
+    final items = data['accesses'] as List? ?? [];
+    if (items.isNotEmpty) {
+      rows.add([]);
+      rows.add(['Drug Name', 'Success', 'Timestamp']);
+      for (final item in items) {
+        final m = item as Map;
+        rows.add(['${m['drug_name'] ?? ''}', '${m['success']}', '${m['timestamp']}']);
+      }
+    }
+  }
+
+  void _addAuditRows(List<List<String>> rows, Map<String, dynamic> data) {
+    final items = data['actions'] as List? ?? [];
+    if (items.isNotEmpty) {
+      rows.add([]);
+      rows.add(['Action', 'Entity', 'Description', 'Timestamp']);
+      for (final item in items) {
+        final m = item as Map;
+        rows.add([
+          '${m['action_type'] ?? ''}',
+          '${m['entity_type'] ?? ''}',
+          '${m['description'] ?? ''}',
+          '${m['timestamp']}',
+        ]);
+      }
+    }
+  }
+
+  /// Export report to Excel (XLSX) bytes
+  Future<Uint8List> exportToExcel(Report report) async {
     final excel = Excel.createExcel();
-    excel.delete('Sheet1');
+    final sheetName = excel.tables.keys.isEmpty ? 'Sheet1' : excel.tables.keys.first;
+    final sheet = excel[sheetName];
 
-    // Get all data
-    final medications = await _medicationService.getAllMedications();
-    final stockItems = await _stockService.getAllStockItems();
-
-    // Medications sheet
-    final medSheet = excel['Medications'];
-    medSheet.appendRow(['ID', 'Trade Name', 'Active Ingredient', 'Form', 'Strength', 'Company']);
-    for (final med in medications) {
-      medSheet.appendRow([
-        med.id,
-        med.tradeName,
-        med.activeIngredient,
-        med.form,
-        med.strength,
-        med.company,
-      ]);
-    }
-
-    // Stock items sheet
-    final stockSheet = excel['Stock Items'];
-    stockSheet.appendRow(['ID', 'Medication ID', 'Quantity', 'Expiry Date', 'Batch Number']);
-    for (final item in stockItems) {
-      stockSheet.appendRow([
-        item.id,
-        item.medicationId,
-        item.quantity,
-        DateFormat('yyyy-MM-dd').format(item.expiryDate),
-        item.batchNumber ?? '',
-      ]);
-    }
-
-    // Summary sheet
-    final summarySheet = excel['Summary'];
-    summarySheet.appendRow(['MedList App - Complete Data Export']);
-    summarySheet.appendRow(['Generated: ${DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now())}']);
-    summarySheet.appendRow([]);
-    summarySheet.appendRow(['Total Medications', medications.length]);
-    summarySheet.appendRow(['Total Stock Items', stockItems.length]);
-
-    final directory = await getApplicationDocumentsDirectory();
-    final fileName = 'MedList_Complete_Export_${DateTime.now().millisecondsSinceEpoch}.xlsx';
-    final file = File('${directory.path}/$fileName');
-    final excelBytes = excel.save();
-    if (excelBytes != null) {
-      await file.writeAsBytes(excelBytes);
-    }
-
-    return file;
-  }
-
-  // Share exported file
-  Future<void> shareFile(File file, ExportFormat format) async {
-    final xFile = XFile(file.path);
-    await Share.shareXFiles(
-      [xFile],
-      subject: file.path.split('/').last,
-    );
-  }
-
-  // Helper methods
-  Future<Map<String, dynamic>> _getDetailedReportData(Report report) async {
-    final data = <String, dynamic>{};
+    int row = 0;
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue(report.title);
+    row++;
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue('Generated: ${_dateFormat.format(report.generatedAt)}');
+    row += 2;
 
     switch (report.type) {
       case ReportType.expiry:
-        final expiringItems = report.data['expiring_items'] as List? ?? [];
-        final expiredItems = report.data['expired_items'] as List? ?? [];
-        
-        // Get medication details
-        final expiringDetails = <Map<String, dynamic>>[];
-        for (final item in expiringItems) {
-          final medication = await _medicationService.getMedicationById(item['medication_id'] as int);
-          if (medication != null) {
-            expiringDetails.add({
-              'medication': medication.tradeName,
-              'quantity': item['quantity'],
-              'expiry_date': item['expiry_date'],
-            });
-          }
-        }
-
-        final expiredDetails = <Map<String, dynamic>>[];
-        for (final item in expiredItems) {
-          final medication = await _medicationService.getMedicationById(item['medication_id'] as int);
-          if (medication != null) {
-            expiredDetails.add({
-              'medication': medication.tradeName,
-              'quantity': item['quantity'],
-              'expiry_date': item['expiry_date'],
-            });
-          }
-        }
-
-        data['expiring_details'] = expiringDetails;
-        data['expired_details'] = expiredDetails;
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue('Metric');
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = TextCellValue('Value');
+        row++;
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue('Expiring Items');
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = TextCellValue('${report.data['expiring_count'] ?? 0}');
+        row++;
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue('Expired Items');
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = TextCellValue('${report.data['expired_count'] ?? 0}');
+        row++;
+        _addExpiryToExcel(sheet, report.data, row);
         break;
-
       case ReportType.stock:
-        // Add stock details if needed
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue('Metric');
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = TextCellValue('Value');
+        row++;
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue('Total Stock Items');
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = TextCellValue('${report.data['total_stock_items'] ?? 0}');
+        row++;
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue('Total Quantity');
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = TextCellValue('${report.data['total_quantity'] ?? 0}');
+        row++;
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue('Low Stock Items');
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = TextCellValue('${report.data['low_stock_count'] ?? 0}');
+        row++;
+        _addStockDetailsToExcel(sheet, report.data, row);
+        _addStockToExcel(sheet, report.data, row);
         break;
-
-      default:
-        break;
-    }
-
-    return data;
-  }
-
-  List<pw.Widget> _buildPDFContent(Report report, Map<String, dynamic> detailedData) {
-    switch (report.type) {
-      case ReportType.expiry:
-        return [
-          pw.Text(
-            'Summary',
-            style: pw.TextStyle(
-              fontSize: 14,
-              fontWeight: pw.FontWeight.bold,
-            ),
-          ),
-          pw.SizedBox(height: 10),
-          pw.Text('Expiring Items: ${report.data['expiring_count'] ?? 0}'),
-          pw.Text('Expired Items: ${report.data['expired_count'] ?? 0}'),
-          pw.SizedBox(height: 20),
-          if (detailedData['expiring_details'] != null && (detailedData['expiring_details'] as List).isNotEmpty)
-            ..._buildExpiryTable('Expiring Items', (detailedData['expiring_details'] as List?)?.cast<Map<String, dynamic>>() ?? []),
-          if (detailedData['expired_details'] != null && (detailedData['expired_details'] as List).isNotEmpty)
-            ..._buildExpiryTable('Expired Items', (detailedData['expired_details'] as List).cast<Map<String, dynamic>>()),
-        ];
-
-      case ReportType.stock:
-        return [
-          pw.Text(
-            'Summary',
-            style: pw.TextStyle(
-              fontSize: 14,
-              fontWeight: pw.FontWeight.bold,
-            ),
-          ),
-          pw.SizedBox(height: 10),
-          pw.Text('Total Stock Items: ${report.data['total_stock_items'] ?? 0}'),
-          pw.Text('Total Quantity: ${report.data['total_quantity'] ?? 0}'),
-          pw.Text('Low Stock Items: ${report.data['low_stock_count'] ?? 0}'),
-        ];
-
       case ReportType.stockMovement:
-        return [
-          pw.Text(
-            'Stock Movement Summary',
-            style: pw.TextStyle(
-              fontSize: 14,
-              fontWeight: pw.FontWeight.bold,
-            ),
-          ),
-          pw.SizedBox(height: 10),
-          pw.Text('Total Adjustments: ${report.data['total_adjustments'] ?? 0}'),
-          pw.Text('Total Increase: ${report.data['total_increase'] ?? 0}'),
-          pw.Text('Total Decrease: ${report.data['total_decrease'] ?? 0}'),
-          pw.SizedBox(height: 20),
-          if (report.data['adjustments_by_reason'] != null)
-            ..._buildStockMovementTable(report.data['adjustments_by_reason'] as Map<String, dynamic>),
-        ];
-
-      default:
-        return [
-          pw.Text('Report Data: ${report.data}'),
-        ];
-    }
-  }
-
-  List<pw.Widget> _buildStockMovementTable(Map<String, dynamic> adjustmentsByReason) {
-    return [
-      pw.Text(
-        'Adjustments by Reason',
-        style: pw.TextStyle(
-          fontSize: 12,
-          fontWeight: pw.FontWeight.bold,
-        ),
-      ),
-      pw.SizedBox(height: 10),
-      pw.Table(
-        border: pw.TableBorder.all(),
-        children: [
-          pw.TableRow(
-            children: [
-              pw.Padding(
-                padding: const pw.EdgeInsets.all(4),
-                child: pw.Text('Reason', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-              ),
-              pw.Padding(
-                padding: const pw.EdgeInsets.all(4),
-                child: pw.Text('Count', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-              ),
-            ],
-          ),
-          ...adjustmentsByReason.entries.map((entry) => pw.TableRow(
-            children: [
-              pw.Padding(
-                padding: const pw.EdgeInsets.all(4),
-                child: pw.Text(entry.key),
-              ),
-              pw.Padding(
-                padding: const pw.EdgeInsets.all(4),
-                child: pw.Text(entry.value.toString()),
-              ),
-            ],
-          )),
-        ],
-      ),
-    ];
-  }
-
-  List<pw.Widget> _buildExpiryTable(String title, List<Map<String, dynamic>> items) {
-    return [
-      pw.SizedBox(height: 20),
-      pw.Text(
-        title,
-        style: pw.TextStyle(
-          fontSize: 14,
-          fontWeight: pw.FontWeight.bold,
-        ),
-      ),
-      pw.SizedBox(height: 10),
-      pw.Table(
-        border: pw.TableBorder.all(),
-        children: [
-          pw.TableRow(
-            children: [
-              pw.Padding(
-                padding: const pw.EdgeInsets.all(4),
-                child: pw.Text('Medication', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-              ),
-              pw.Padding(
-                padding: const pw.EdgeInsets.all(4),
-                child: pw.Text('Quantity', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-              ),
-              pw.Padding(
-                padding: const pw.EdgeInsets.all(4),
-                child: pw.Text('Expiry Date', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-              ),
-            ],
-          ),
-          ...items.map((item) => pw.TableRow(
-            children: [
-              pw.Padding(
-                padding: const pw.EdgeInsets.all(4),
-                child: pw.Text(item['medication']?.toString() ?? ''),
-              ),
-              pw.Padding(
-                padding: const pw.EdgeInsets.all(4),
-                child: pw.Text(item['quantity']?.toString() ?? ''),
-              ),
-              pw.Padding(
-                padding: const pw.EdgeInsets.all(4),
-                child: pw.Text(item['expiry_date']?.toString() ?? ''),
-              ),
-            ],
-          )),
-        ],
-      ),
-    ];
-  }
-
-  void _buildExcelContent(dynamic sheet, Report report, Map<String, dynamic> detailedData) {
-    switch (report.type) {
-      case ReportType.expiry:
-        sheet.appendRow(['Summary']);
-        sheet.appendRow(['Expiring Items', report.data['expiring_count'] ?? 0]);
-        sheet.appendRow(['Expired Items', report.data['expired_count'] ?? 0]);
-        sheet.appendRow([]);
-
-        if (detailedData['expiring_details'] != null && (detailedData['expiring_details'] as List).isNotEmpty) {
-          sheet.appendRow(['Expiring Items']);
-          sheet.appendRow(['Medication', 'Quantity', 'Expiry Date']);
-          for (final item in detailedData['expiring_details'] as List) {
-            sheet.appendRow([
-              item['medication']?.toString() ?? '',
-              item['quantity']?.toString() ?? '',
-              item['expiry_date']?.toString() ?? '',
-            ]);
-          }
-          sheet.appendRow([]);
-        }
-
-        if (detailedData['expired_details'] != null && (detailedData['expired_details'] as List).isNotEmpty) {
-          sheet.appendRow(['Expired Items']);
-          sheet.appendRow(['Medication', 'Quantity', 'Expiry Date']);
-          for (final item in detailedData['expired_details'] as List) {
-            sheet.appendRow([
-              item['medication']?.toString() ?? '',
-              item['quantity']?.toString() ?? '',
-              item['expiry_date']?.toString() ?? '',
-            ]);
-          }
-        }
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue('Total Adjustments');
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = TextCellValue('${report.data['total_adjustments'] ?? 0}');
+        row++;
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue('Total Increase');
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = TextCellValue('${report.data['total_increase'] ?? 0}');
+        row++;
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue('Total Decrease');
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = TextCellValue('${report.data['total_decrease'] ?? 0}');
+        row++;
+        _addStockMovementToExcel(sheet, report.data, row);
         break;
-
-      case ReportType.stock:
-        sheet.appendRow(['Summary']);
-        sheet.appendRow(['Total Stock Items', report.data['total_stock_items'] ?? 0]);
-        sheet.appendRow(['Total Quantity', report.data['total_quantity'] ?? 0]);
-        sheet.appendRow(['Low Stock Items', report.data['low_stock_count'] ?? 0]);
-        break;
-
-      case ReportType.stockMovement:
-        sheet.appendRow(['Stock Movement Summary']);
-        sheet.appendRow(['Total Adjustments', report.data['total_adjustments'] ?? 0]);
-        sheet.appendRow(['Total Increase', report.data['total_increase'] ?? 0]);
-        sheet.appendRow(['Total Decrease', report.data['total_decrease'] ?? 0]);
-        sheet.appendRow([]);
-        if (report.data['adjustments_by_reason'] != null) {
-          sheet.appendRow(['Adjustments by Reason']);
-          sheet.appendRow(['Reason', 'Count']);
-          final adjustmentsByReason = report.data['adjustments_by_reason'] as Map<String, dynamic>;
-          for (final entry in adjustmentsByReason.entries) {
-            sheet.appendRow([entry.key, entry.value]);
-          }
-        }
-        break;
-
-      default:
-        sheet.appendRow(['Report Data']);
-        sheet.appendRow([report.data.toString()]);
-    }
-  }
-
-  String _getSheetName(ReportType type) {
-    switch (type) {
-      case ReportType.expiry:
-        return 'Expiry Report';
-      case ReportType.stock:
-        return 'Stock Report';
-      case ReportType.stockMovement:
-        return 'Stock Movement Report';
       case ReportType.verification:
-        return 'Verification Report';
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue('Total Verifications');
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = TextCellValue('${report.data['total_verifications'] ?? 0}');
+        row++;
+        _addVerificationToExcel(sheet, report.data, row);
+        break;
       case ReportType.mimsAccess:
-        return 'MIMS Access Report';
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue('Total Accesses');
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = TextCellValue('${report.data['total_accesses'] ?? 0}');
+        row++;
+        _addMimsToExcel(sheet, report.data, row);
+        break;
       case ReportType.audit:
-        return 'Audit Report';
-      case ReportType.interaction:
-        return 'Interaction Report';
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue('Total Actions');
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = TextCellValue('${report.data['total_actions'] ?? 0}');
+        row++;
+        _addAuditToExcel(sheet, report.data, row);
+        break;
+      default:
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = TextCellValue('Report: ${report.title}');
     }
+
+    final bytes = excel.encode();
+    return Uint8List.fromList(bytes ?? []);
+  }
+
+  void _addExpiryToExcel(Sheet sheet, Map<String, dynamic> data, int startRow) {
+    final items = data['expired_items'] as List? ?? [];
+    if (items.isEmpty) return;
+    int r = startRow + 1;
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).value = TextCellValue('ID');
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: r)).value = TextCellValue('Medication ID');
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: r)).value = TextCellValue('Quantity');
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: r)).value = TextCellValue('Expiry Date');
+    r++;
+    for (final item in items) {
+      final m = item as Map;
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).value = TextCellValue('${m['id']}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: r)).value = TextCellValue('${m['medication_id']}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: r)).value = TextCellValue('${m['quantity']}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: r)).value = TextCellValue('${m['expiry_date']}');
+      r++;
+    }
+  }
+
+  void _addStockDetailsToExcel(Sheet sheet, Map<String, dynamic> data, int startRow) {
+    final items = data['stock_details'] as List? ?? [];
+    if (items.isEmpty) return;
+    int r = startRow + 1;
+    final headers = ['Brand', 'Supplier', 'Generic', 'Quantity', 'Expiry', 'Batch'];
+    for (var c = 0; c < headers.length; c++) {
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r)).value = TextCellValue(headers[c]);
+    }
+    r++;
+    for (final item in items) {
+      final m = item as Map;
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).value = TextCellValue('${m['brand'] ?? ''}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: r)).value = TextCellValue('${m['supplier'] ?? ''}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: r)).value = TextCellValue('${m['generic'] ?? ''}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: r)).value = TextCellValue('${m['quantity']}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r)).value = TextCellValue('${m['expiry']}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: r)).value = TextCellValue('${m['batch'] ?? ''}');
+      r++;
+    }
+  }
+
+  void _addStockToExcel(Sheet sheet, Map<String, dynamic> data, int startRow) {
+    final items = data['low_stock_items'] as List? ?? [];
+    if (items.isEmpty) return;
+    int r = startRow + 1;
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).value = TextCellValue('ID');
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: r)).value = TextCellValue('Medication ID');
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: r)).value = TextCellValue('Quantity');
+    r++;
+    for (final item in items) {
+      final m = item as Map;
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).value = TextCellValue('${m['id']}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: r)).value = TextCellValue('${m['medication_id']}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: r)).value = TextCellValue('${m['quantity']}');
+      r++;
+    }
+  }
+
+  void _addStockMovementToExcel(Sheet sheet, Map<String, dynamic> data, int startRow) {
+    final items = data['adjustments'] as List? ?? [];
+    if (items.isEmpty) return;
+    int r = startRow + 1;
+    final headers = ['Medication', 'Old', 'New', 'Diff', 'Reason', 'Date'];
+    for (var c = 0; c < headers.length; c++) {
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r)).value = TextCellValue(headers[c]);
+    }
+    r++;
+    for (final item in items) {
+      final m = item as Map;
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).value = TextCellValue('${m['medication_name'] ?? ''}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: r)).value = TextCellValue('${m['old_quantity'] ?? ''}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: r)).value = TextCellValue('${m['new_quantity'] ?? ''}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: r)).value = TextCellValue('${m['quantity_difference'] ?? ''}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r)).value = TextCellValue('${m['reason'] ?? ''}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: r)).value = TextCellValue('${m['adjusted_at'] ?? ''}');
+      r++;
+    }
+  }
+
+  void _addVerificationToExcel(Sheet sheet, Map<String, dynamic> data, int startRow) {
+    final items = data['verifications'] as List? ?? [];
+    if (items.isEmpty) return;
+    int r = startRow + 1;
+    final headers = ['Medication', 'Verified', 'Contraindication', 'Interaction', 'Date'];
+    for (var c = 0; c < headers.length; c++) {
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r)).value = TextCellValue(headers[c]);
+    }
+    r++;
+    for (final item in items) {
+      final m = item as Map;
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).value = TextCellValue('${m['medication_name'] ?? ''}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: r)).value = TextCellValue('${m['identity_verified']}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: r)).value = TextCellValue('${m['contraindication_found']}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: r)).value = TextCellValue('${m['interaction_found']}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: r)).value = TextCellValue('${m['verified_at']}');
+      r++;
+    }
+  }
+
+  void _addMimsToExcel(Sheet sheet, Map<String, dynamic> data, int startRow) {
+    final items = data['accesses'] as List? ?? [];
+    if (items.isEmpty) return;
+    int r = startRow + 1;
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).value = TextCellValue('Drug Name');
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: r)).value = TextCellValue('Success');
+    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: r)).value = TextCellValue('Timestamp');
+    r++;
+    for (final item in items) {
+      final m = item as Map;
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).value = TextCellValue('${m['drug_name'] ?? ''}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: r)).value = TextCellValue('${m['success']}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: r)).value = TextCellValue('${m['timestamp']}');
+      r++;
+    }
+  }
+
+  void _addAuditToExcel(Sheet sheet, Map<String, dynamic> data, int startRow) {
+    final items = data['actions'] as List? ?? [];
+    if (items.isEmpty) return;
+    int r = startRow + 1;
+    final headers = ['Action', 'Entity', 'Description', 'Timestamp'];
+    for (var c = 0; c < headers.length; c++) {
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r)).value = TextCellValue(headers[c]);
+    }
+    r++;
+    for (final item in items) {
+      final m = item as Map;
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).value = TextCellValue('${m['action_type'] ?? ''}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: r)).value = TextCellValue('${m['entity_type'] ?? ''}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: r)).value = TextCellValue('${m['description'] ?? ''}');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: r)).value = TextCellValue('${m['timestamp']}');
+      r++;
+    }
+  }
+
+  /// Export report to Word (HTML-based .doc, opens in Word)
+  Future<Uint8List> exportToWord(Report report) async {
+    final buffer = StringBuffer();
+    buffer.writeln('<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word">');
+    buffer.writeln('<head><meta charset="utf-8"><title>${report.title}</title></head><body>');
+    buffer.writeln('<h1>${report.title}</h1>');
+    buffer.writeln('<p>Generated: ${_dateFormat.format(report.generatedAt)}</p>');
+    buffer.writeln('<p>Period: ${DateFormat('MMM dd, yyyy').format(report.startDate)} - ${DateFormat('MMM dd, yyyy').format(report.endDate)}</p>');
+    buffer.writeln('<table border="1" cellpadding="4" cellspacing="0">');
+
+    final rows = <List<String>>[];
+    switch (report.type) {
+      case ReportType.expiry:
+        rows.addAll([['Metric', 'Value'], ['Expiring Items', '${report.data['expiring_count'] ?? 0}'], ['Expired Items', '${report.data['expired_count'] ?? 0}']]);
+        _addExpiryRowsToWord(rows, report.data);
+        break;
+      case ReportType.stock:
+        rows.addAll([['Metric', 'Value'], ['Total Stock Items', '${report.data['total_stock_items'] ?? 0}'], ['Total Quantity', '${report.data['total_quantity'] ?? 0}'], ['Low Stock Items', '${report.data['low_stock_count'] ?? 0}']]);
+        _addStockDetailsRowsToWord(rows, report.data);
+        _addStockRowsToWord(rows, report.data);
+        break;
+      case ReportType.stockMovement:
+        rows.addAll([['Metric', 'Value'], ['Total Adjustments', '${report.data['total_adjustments'] ?? 0}'], ['Total Increase', '${report.data['total_increase'] ?? 0}'], ['Total Decrease', '${report.data['total_decrease'] ?? 0}']]);
+        _addStockMovementRowsToWord(rows, report.data);
+        break;
+      case ReportType.verification:
+        rows.addAll([['Total Verifications', '${report.data['total_verifications'] ?? 0}'], ['Verified', '${report.data['verified_count'] ?? 0}']]);
+        _addVerificationRowsToWord(rows, report.data);
+        break;
+      case ReportType.mimsAccess:
+        rows.add(['Total Accesses', '${report.data['total_accesses'] ?? 0}']);
+        _addMimsRowsToWord(rows, report.data);
+        break;
+      case ReportType.audit:
+        rows.add(['Total Actions', '${report.data['total_actions'] ?? 0}']);
+        _addAuditRowsToWord(rows, report.data);
+        break;
+      default:
+        rows.add(['Report', report.title]);
+    }
+
+    for (final row in rows) {
+      buffer.writeln('<tr>');
+      for (final cell in row) {
+        buffer.writeln('<td>${_escapeHtml(cell)}</td>');
+      }
+      buffer.writeln('</tr>');
+    }
+    buffer.writeln('</table></body></html>');
+    return Uint8List.fromList(buffer.toString().codeUnits);
+  }
+
+  String _escapeHtml(String s) => s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+
+  void _addExpiryRowsToWord(List<List<String>> rows, Map<String, dynamic> data) {
+    final items = data['expired_items'] as List? ?? [];
+    if (items.isEmpty) return;
+    rows.add([]);
+    rows.add(['ID', 'Medication ID', 'Quantity', 'Expiry Date']);
+    for (final item in items) {
+      final m = item as Map;
+      rows.add(['${m['id']}', '${m['medication_id']}', '${m['quantity']}', '${m['expiry_date']}']);
+    }
+  }
+
+  void _addStockDetailsRowsToWord(List<List<String>> rows, Map<String, dynamic> data) {
+    final items = data['stock_details'] as List? ?? [];
+    if (items.isEmpty) return;
+    rows.add([]);
+    rows.add(['Brand', 'Supplier', 'Generic', 'Quantity', 'Expiry', 'Batch']);
+    for (final item in items) {
+      final m = item as Map;
+      rows.add(['${m['brand'] ?? ''}', '${m['supplier'] ?? ''}', '${m['generic'] ?? ''}', '${m['quantity']}', '${m['expiry']}', '${m['batch'] ?? ''}']);
+    }
+  }
+
+  void _addStockRowsToWord(List<List<String>> rows, Map<String, dynamic> data) {
+    final items = data['low_stock_items'] as List? ?? [];
+    if (items.isEmpty) return;
+    rows.add([]);
+    rows.add(['ID', 'Medication ID', 'Quantity']);
+    for (final item in items) {
+      final m = item as Map;
+      rows.add(['${m['id']}', '${m['medication_id']}', '${m['quantity']}']);
+    }
+  }
+
+  void _addStockMovementRowsToWord(List<List<String>> rows, Map<String, dynamic> data) {
+    final items = data['adjustments'] as List? ?? [];
+    if (items.isEmpty) return;
+    rows.add([]);
+    rows.add(['Medication', 'Old', 'New', 'Diff', 'Reason', 'Date']);
+    for (final item in items) {
+      final m = item as Map;
+      rows.add(['${m['medication_name'] ?? ''}', '${m['old_quantity']}', '${m['new_quantity']}', '${m['quantity_difference']}', '${m['reason']}', '${m['adjusted_at']}']);
+    }
+  }
+
+  void _addVerificationRowsToWord(List<List<String>> rows, Map<String, dynamic> data) {
+    final items = data['verifications'] as List? ?? [];
+    if (items.isEmpty) return;
+    rows.add([]);
+    rows.add(['Medication', 'Verified', 'Contraindication', 'Interaction', 'Date']);
+    for (final item in items) {
+      final m = item as Map;
+      rows.add(['${m['medication_name'] ?? ''}', '${m['identity_verified']}', '${m['contraindication_found']}', '${m['interaction_found']}', '${m['verified_at']}']);
+    }
+  }
+
+  void _addMimsRowsToWord(List<List<String>> rows, Map<String, dynamic> data) {
+    final items = data['accesses'] as List? ?? [];
+    if (items.isEmpty) return;
+    rows.add([]);
+    rows.add(['Drug Name', 'Success', 'Timestamp']);
+    for (final item in items) {
+      final m = item as Map;
+      rows.add(['${m['drug_name'] ?? ''}', '${m['success']}', '${m['timestamp']}']);
+    }
+  }
+
+  void _addAuditRowsToWord(List<List<String>> rows, Map<String, dynamic> data) {
+    final items = data['actions'] as List? ?? [];
+    if (items.isEmpty) return;
+    rows.add([]);
+    rows.add(['Action', 'Entity', 'Description', 'Timestamp']);
+    for (final item in items) {
+      final m = item as Map;
+      rows.add(['${m['action_type'] ?? ''}', '${m['entity_type'] ?? ''}', '${m['description'] ?? ''}', '${m['timestamp']}']);
+    }
+  }
+
+  /// Share file bytes via share_plus (includes Email option in share sheet)
+  Future<void> shareFile(Uint8List bytes, ExportFormat format) async {
+    final ext = format.extension;
+    final name = 'report_${DateTime.now().millisecondsSinceEpoch}.$ext';
+    final xFile = XFile.fromData(
+      bytes,
+      mimeType: format.mimeType,
+      name: name,
+    );
+    await Share.shareXFiles([xFile], text: 'MedList Report - Share via Email or save');
   }
 }
-

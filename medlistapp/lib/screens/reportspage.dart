@@ -6,7 +6,6 @@ import 'package:medlistapp/models/exportformat.dart';
 import 'package:medlistapp/utils/appcolors.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
-import 'dart:io';
 
 class ReportsPage extends StatefulWidget {
   const ReportsPage({super.key});
@@ -126,6 +125,12 @@ class _ReportsPageState extends State<ReportsPage> {
               subtitle: const Text('Microsoft Excel (XLSX)'),
               onTap: () => Navigator.pop(context, ExportFormat.excel),
             ),
+            ListTile(
+              leading: const Icon(Icons.description),
+              title: const Text('Word'),
+              subtitle: const Text('Microsoft Word (DOC) - Can share via email'),
+              onTap: () => Navigator.pop(context, ExportFormat.word),
+            ),
           ],
         ),
       ),
@@ -139,11 +144,14 @@ class _ReportsPageState extends State<ReportsPage> {
         final csv = await _exportService.exportToCSV(report);
         await Share.share(csv, subject: report.title);
       } else if (format == ExportFormat.pdf) {
-        final file = await _exportService.exportToPDF(report);
-        await _exportService.shareFile(file, format);
+        final bytes = await _exportService.exportToPDF(report);
+        await _exportService.shareFile(bytes, format);
       } else if (format == ExportFormat.excel) {
-        final file = await _exportService.exportToExcel(report);
-        await _exportService.shareFile(file, format);
+        final bytes = await _exportService.exportToExcel(report);
+        await _exportService.shareFile(bytes, format);
+      } else if (format == ExportFormat.word) {
+        final bytes = await _exportService.exportToWord(report);
+        await _exportService.shareFile(bytes, format);
       }
 
       if (mounted) {

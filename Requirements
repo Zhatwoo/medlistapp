@@ -6,3 +6,369 @@ Expiration checking :  Able to give easier access for expiration checking
 Medication verification : To verify possible indication and contraindication and verification of identity of medicine
 
 Having an access in MIMS
+
+
+
+# 1. Core Objective of the Mobile Application
+
+To **ensure patient safety, accurate medication verification, efficient expiry management, and reliable stock control**, using the client’s existing medication list and **verified drug information from MIMS**.
+
+---
+
+# 2. User Roles & Access Control
+
+### 2.1 User Roles
+
+- **Pharmacist**
+- **Doctor / Clinician**
+- **Inventory / Store Manager**
+- **Administrator**
+
+### 2.2 Role-Based Permissions
+
+- Login with secure authentication (PIN / biometric)
+- Access limited based on role
+- Audit trail of user actions (who verified, adjusted stock, etc.)
+
+---
+
+# 3. Medication Master & Categorization
+
+### 3.1 Medication Master (From Client List)
+
+- Import client-provided medication list
+- Brand name
+- Generic name
+- Strength
+- Dosage form
+- Manufacturer
+- Therapeutic category
+- Storage condition
+- Controlled drug flag (if applicable)
+
+### 3.2 Categorization Features
+
+- By therapeutic class
+- By dosage form
+- By storage condition
+- By expiry status
+- By stock level
+
+---
+
+# 4. Medication Verification (Core Safety Feature)
+
+### 4.1 Medication Identity Verification
+
+- Barcode / QR code scanning
+- Manual search
+- Verify:
+    - Brand & generic name
+    - Strength & formulation
+    - Manufacturer
+    - Batch / lot number
+
+### 4.2 Indication & Contraindication Check (MIMS)
+
+- Approved indications
+- Contraindications
+- Drug–drug interactions
+- Special warnings:
+    - Pregnancy
+    - Pediatric
+    - Geriatric
+    - Renal / hepatic impairment
+- Clear “Source: MIMS” reference
+
+---
+
+# 5. Expiry Management
+
+### 5.1 Expiry Data Capture
+
+- Expiry date per batch
+- Batch / lot tracking
+- Manufacturing date (optional)
+
+### 5.2 Expiry Monitoring
+
+- Real-time expiry status
+- Color-coded indicators:
+    - Green – Safe
+    - Yellow – Near expiry
+    - Red – Expired
+
+### 5.3 Expiry Alerts & Notifications
+
+- Configurable alert periods (30/60/90 days)
+- Push notifications
+- Dashboard alerts
+
+### 5.4 Quick Expiry Checking
+
+- One-tap expiry check
+- Scan medication → instant expiry status
+- Filter expiring items by time range
+
+---
+
+# 6. Inventory & Stock Management
+
+### 6.1 Stock Tracking
+
+- Real-time stock quantity
+- Batch-wise stock
+- Storage location tracking
+
+### 6.2 Stock Reconciliation
+
+- Expected vs actual stock comparison
+- Manual stock adjustment
+- Reasons for adjustment:
+    - Dispensed
+    - Damaged
+    - Expired
+    - Lost
+
+### 6.3 Stock Alerts
+
+- Low stock alerts
+- Out-of-stock alerts
+- Overstock indicators
+
+---
+
+# 7. Patient Safety & Diagnosis Support (Supportive Only)
+
+### 7.1 Patient Profile Entry
+
+- Age
+- Gender
+- Weight (optional)
+- Known allergies
+- Existing conditions
+
+### 7.2 Medication Suitability Check
+
+- Match medication against patient profile
+- Contraindication warnings
+- Allergy alerts
+- Duplicate therapy alerts
+
+### 7.3 Clinical Disclaimer
+
+- Clearly displayed:
+    
+    > “This application supports clinical decision-making and does not replace professional medical judgment.”
+    > 
+
+---
+
+# 8. MIMS Integration
+
+### 8.1 Drug Information Access
+
+- Embedded MIMS drug monographs
+- Search within medication details
+- Structured sections:
+    - Indications
+    - Contraindications
+    - Dosage
+    - Warnings
+    - Interactions
+
+### 8.2 Offline & Performance
+
+- Cache frequently used drug data
+- Read-only offline access (if licensed)
+
+---
+
+# 9. Dashboard & User Interface
+
+### 9.1 Home Dashboard
+
+- Expiry alerts
+- Low stock alerts
+- Quick statistics:
+    - Total medications
+    - Near-expiry count
+    - Expired items
+
+### 9.2 Visual Indicators
+
+- Icons & color codes
+- Minimal text, expandable sections
+- Fast navigation
+
+---
+
+# 10. Search & Filtering
+
+- Search by:
+    - Brand name
+    - Generic name
+    - Category
+- Filters:
+    - Expiry date
+    - Stock level
+    - Therapeutic class
+    - Dosage form
+
+---
+
+# 11. Reports & Analytics
+
+### 11.1 Standard Reports
+
+- Expiry report
+- Stock movement report
+- Reconciliation report
+- Medication verification history
+
+### 11.2 Export Options
+
+- PDF / Excel export
+- Date-range selection
+
+---
+
+# 12. Notifications & Alerts
+
+- Expiry alerts
+- Low stock alerts
+- System alerts
+- Role-specific notifications
+
+---
+
+# 13. Security & Compliance
+
+- Secure login (PIN / biometric)
+- Data encryption
+- Role-based access control
+- Audit logs
+- Compliance with healthcare data regulations
+
+---
+
+# 14. Offline & Sync Capability
+
+- Offline data access
+- Background sync when online
+- Conflict resolution handling
+
+---
+
+# 15. System Administration Features
+
+- User management
+- Role assignment
+- Alert configuration
+- Data backup & restore
+- MIMS license management
+
+---
+
+# 16. What the App Should Primarily Focus On (Client Value)
+
+✅ Patient safety
+
+✅ Medication accuracy
+
+✅ Fast expiry checking
+
+✅ Reliable MIMS-based verification
+
+✅ Simple inventory control
+
+✅ Minimal learning curve
+
+
+
+
+
+
+
+Mga kulang na features
+1. User Roles & Access Control (Section 2)
+Wala pa:
+Login system (PIN/biometric)
+User roles (Pharmacist, Doctor, Inventory Manager, Administrator)
+Role-based permissions
+User management page
+User authentication service
+2. Patient Profile Management (Section 7.1)
+Wala pa:
+Patient profile model (age, gender, weight, allergies, conditions)
+Patient profile storage sa database
+Patient profile entry page
+Patient list management
+3. Push Notifications & Alerts (Section 12)
+Wala pa:
+Push notifications (Firebase Cloud Messaging/local notifications)
+Background notification service
+Role-specific notifications
+
+4. Export Options (Section 11.2)
+May CSV export, kulang:
+PDF export
+Excel export (XLSX)
+------------------------------------
+5. Security Features (Section 13)
+Wala pa:
+PIN/biometric authentication
+Data encryption at rest
+Secure storage ng credentials
+------------------------------------
+6. Medication Master Data (Section 3.1)
+Kulang sa Medication model:
+Storage condition field
+Controlled drug flag
+Therapeutic category (may generic category lang)
+7. Stock Management Enhancements (Section 6)
+Kulang:
+Expected vs actual stock comparison
+Overstock indicators
+Manufacturing date sa stock items
+Reasons for adjustment (Dispensed, Damaged, Expired, Lost) — may structure pero hindi fully implemented
+------------------------------------
+
+8. MIMS Integration Enhancements (Section 8.1)
+May basic MIMS integration, kulang:
+Structured MIMS sections display (Indications, Contraindications, Dosage, Warnings, Interactions)
+"Source: MIMS" reference display
+Special warnings (Pregnancy, Pediatric, Geriatric, Renal/Hepatic impairment)
+9. System Administration (Section 15)
+Wala pa:
+User management UI
+Role assignment interface
+Data backup & restore functionality
+MIMS license management UI
+10. Offline & Sync (Section 14)
+May basic sync, kulang:
+Conflict resolution handling
+Background sync service
+Sync status indicators
+11. Additional Missing Features
+Clinical disclaimer display (Section 7.3)
+Storage condition categorization (Section 3.2)
+Stock level categorization (Section 3.2)
+One-tap expiry check (Section 5.4) — may expiry checking pero walang one-tap feature
+Stock movement report (Section 11.1) — may reports pero walang specific stock movement report
+Priority implementation order
+High priority:
+User authentication & roles
+Patient profile management
+Push notifications
+PDF/Excel export
+Medium priority:
+Security enhancements (encryption, biometric)
+System administration features
+Enhanced MIMS display
+Stock reconciliation enhancements
+Low priority:
+Additional categorization
+UI/UX improvements
+Advanced sync features
+Gusto mo bang simulan natin sa User Authentication & Roles system?

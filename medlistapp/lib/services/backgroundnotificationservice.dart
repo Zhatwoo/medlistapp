@@ -1,3 +1,5 @@
+import 'package:medlistapp/models/userrole.dart';
+import 'package:medlistapp/services/authservice.dart';
 import 'package:medlistapp/services/notificationservice.dart';
 import 'package:medlistapp/services/expiryservice.dart';
 import 'package:medlistapp/services/stockservice.dart';
@@ -10,24 +12,58 @@ class BackgroundNotificationService {
   final ExpiryService _expiryService = ExpiryService();
   final StockService _stockService = StockService();
   final MedicationService _medicationService = MedicationService();
+  final AuthService _authService = AuthService();
 
-  // Run all daily checks
+  Future<UserRole> _getUserRole() async {
+    try {
+      return await _authService.getUserRole();
+    } catch (_) {
+      return UserRole.pharmacist;
+    }
+  }
+
   Future<void> runDailyChecks() async {
     await checkExpiryAlerts();
     await checkLowStockAlerts();
+    await checkOutOfStockAlerts();
   }
 
-  // Check and notify about expiring medications
   Future<void> checkExpiryAlerts() async {
     try {
+      final role = await _getUserRole();
+      if (role != UserRole.pharmacist && role != UserRole.inventoryManager && role != UserRole.admin) {
+        return;
+      }
+
       final prefs = await SharedPreferences.getInstance();
       final expiryAlertDays = prefs.getInt('expiry_alert_days') ?? AppConstants.defaultExpiryAlertDays;
-      
+
+      // 1. Check EXPIRED items first
+      final expiredItems = await _expiryService.getExpiredMedications();
+      if (expiredItems.isNotEmpty) {
+        final expiredList = <String>[];
+        for (final item in expiredItems) {
+          final medication = await _medicationService.getMedicationById(item.medicationId);
+          if (medication != null) {
+            expiredList.add('${medication.tradeName} (${item.quantity} units)');
+          }
+        }
+        if (expiredList.isNotEmpty) {
+          final count = expiredList.length;
+          await _notificationService.showExpiryAlert(
+            title: '⚠️ Medications Expired',
+            body: count == 1
+                ? '${expiredList.first} has expired'
+                : '$count medications have expired',
+            data: {'type': 'expiry', 'category': 'expired', 'count': count, 'items': expiredList},
+          );
+        }
+      }
+
+      // 2. Check EXPIRING items (within alert days)
       final expiringItems = await _expiryService.getExpiringMedications(expiryAlertDays);
-      
       if (expiringItems.isEmpty) return;
 
-      // Group by days until expiry
       final expiringToday = <String>[];
       final expiringSoon = <String>[];
 
@@ -35,7 +71,7 @@ class BackgroundNotificationService {
         final medication = await _medicationService.getMedicationById(item.medicationId);
         if (medication == null) continue;
 
-        final daysUntilExpiry = item.expiryDate.difference(DateTime.now()).inDays;
+        final daysUntilExpiry = item.daysUntilExpiry;
         final itemInfo = '${medication.tradeName} (${item.quantity} units)';
 
         if (daysUntilExpiry <= 0) {
@@ -45,19 +81,14 @@ class BackgroundNotificationService {
         }
       }
 
-      // Send notifications
       if (expiringToday.isNotEmpty) {
         final count = expiringToday.length;
         await _notificationService.showExpiryAlert(
-          title: '⚠️ Medications Expired',
+          title: '⚠️ Medications Expiring Today',
           body: count == 1
-              ? '${expiringToday.first} has expired'
-              : '$count medications have expired',
-          data: {
-            'type': 'expiry',
-            'count': count,
-            'items': expiringToday,
-          },
+              ? '${expiringToday.first} expires today'
+              : '$count medications expire today',
+          data: {'type': 'expiry', 'category': 'expiring', 'count': count, 'items': expiringToday},
         );
       } else if (expiringSoon.isNotEmpty) {
         final count = expiringSoon.length;
@@ -66,32 +97,28 @@ class BackgroundNotificationService {
           body: count == 1
               ? '${expiringSoon.first} is expiring within 7 days'
               : '$count medications are expiring within 7 days',
-          data: {
-            'type': 'expiry',
-            'count': count,
-            'items': expiringSoon,
-          },
+          data: {'type': 'expiry', 'category': 'expiring', 'count': count, 'items': expiringSoon},
         );
-      } else if (expiringItems.length > 0) {
+      } else if (expiringItems.isNotEmpty) {
         final count = expiringItems.length;
         await _notificationService.showExpiryAlert(
           title: '📅 Medications Expiring',
           body: '$count medication${count > 1 ? 's are' : ' is'} expiring within $expiryAlertDays days',
-          data: {
-            'type': 'expiry',
-            'count': count,
-          },
+          data: {'type': 'expiry', 'category': 'expiring', 'count': count},
         );
       }
     } catch (e) {
-      // Log error but don't throw
       print('Error checking expiry alerts: $e');
     }
   }
 
-  // Check and notify about low stock
   Future<void> checkLowStockAlerts() async {
     try {
+      final role = await _getUserRole();
+      if (role != UserRole.pharmacist && role != UserRole.inventoryManager && role != UserRole.admin) {
+        return;
+      }
+
       final prefs = await SharedPreferences.getInstance();
       final lowStockThreshold = prefs.getInt('low_stock_threshold') ?? AppConstants.defaultLowStockThreshold;
       
@@ -118,6 +145,7 @@ class BackgroundNotificationService {
             : '$count items are running low on stock',
         data: {
           'type': 'lowStock',
+          'category': 'lowStock',
           'count': count,
           'items': lowStockList,
         },
@@ -128,9 +156,13 @@ class BackgroundNotificationService {
     }
   }
 
-  // Check for out of stock items
   Future<void> checkOutOfStockAlerts() async {
     try {
+      final role = await _getUserRole();
+      if (role != UserRole.pharmacist && role != UserRole.inventoryManager && role != UserRole.admin) {
+        return;
+      }
+
       final allStockItems = await _stockService.getAllStockItems();
       final outOfStock = allStockItems.where((item) => item.quantity == 0).toList();
 
@@ -154,6 +186,7 @@ class BackgroundNotificationService {
             : '$count medications are out of stock',
         data: {
           'type': 'outOfStock',
+          'category': 'outOfStock',
           'count': count,
           'items': medicationNames,
         },
@@ -163,5 +196,7 @@ class BackgroundNotificationService {
     }
   }
 }
+
+
 
 

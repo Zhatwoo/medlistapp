@@ -24,3 +24,5 @@ extension StockAdjustmentReasonExtension on StockAdjustmentReason {
 }
 
 
+
+

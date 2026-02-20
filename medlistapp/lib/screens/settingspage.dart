@@ -2,18 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:medlistapp/utils/constants.dart';
 import 'package:medlistapp/utils/appcolors.dart';
+import 'package:medlistapp/services/authservice.dart';
 import 'package:medlistapp/services/mimsservice.dart';
+import 'package:medlistapp/screens/loginscreen.dart';
 import 'package:medlistapp/services/syncservice.dart';
 import 'package:medlistapp/services/mimscacheservice.dart';
-import 'package:medlistapp/services/datainitializationservice.dart';
-import 'package:medlistapp/services/exportservice.dart';
-import 'package:medlistapp/models/exportformat.dart';
-import 'package:medlistapp/services/notificationservice.dart';
-import 'package:medlistapp/services/mohdataparser.dart';
-import 'package:medlistapp/services/authservice.dart';
-import 'package:medlistapp/services/medicationservice.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:medlistapp/services/localauthservice.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -23,13 +17,10 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
+  final AuthService _authService = AuthService();
   final MimsService _mimsService = MimsService();
   final SyncService _syncService = SyncService();
   final MimsCacheService _cacheService = MimsCacheService();
-  final NotificationService _notificationService = NotificationService();
-  final ExportService _exportService = ExportService();
-  final MedicationService _medicationService = MedicationService();
-  final AuthService _authService = AuthService();
   
   int _expiryAlertDays = AppConstants.defaultExpiryAlertDays;
   int _lowStockThreshold = AppConstants.defaultLowStockThreshold;
@@ -37,10 +28,14 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _offlineMode = false;
   bool _isLoading = true;
   bool _hasMimsCredentials = false;
+  bool _biometricEnabled = false;
+  bool _biometricAvailable = false;
+  bool _hasPin = false;
   bool _expiryAlertsEnabled = true;
   bool _lowStockAlertsEnabled = true;
   bool _systemAlertsEnabled = true;
-  
+  final LocalAuthService _localAuth = LocalAuthService();
+
   final TextEditingController _mimsApiKeyController = TextEditingController();
   final TextEditingController _mimsApiSecretController = TextEditingController();
 
@@ -50,17 +45,72 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadSettings();
   }
 
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Log out'),
+        content: const Text('Are you sure you want to log out?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.errorRed,
+              foregroundColor: AppColors.pureWhite,
+            ),
+            child: const Text('Log out'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await _authService.signOut();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => LoginScreen()),
+        (route) => false,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Logout failed: $e'),
+            backgroundColor: AppColors.errorRed,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     final hasCredentials = await _mimsService.hasCredentials();
-    setState(() {
-      _expiryAlertDays = prefs.getInt('expiry_alert_days') ?? AppConstants.defaultExpiryAlertDays;
-      _lowStockThreshold = prefs.getInt('low_stock_threshold') ?? AppConstants.defaultLowStockThreshold;
-      _syncFrequencyHours = prefs.getInt('sync_frequency_hours') ?? 24;
-      _offlineMode = prefs.getBool('offline_mode') ?? false;
-      _hasMimsCredentials = hasCredentials;
-      _isLoading = false;
-    });
+    final biometricEnabled = await _localAuth.isBiometricEnabled();
+    final biometricAvailable = await _localAuth.isBiometricAvailable();
+    final hasPin = await _localAuth.hasPin();
+    if (mounted) {
+      setState(() {
+        _expiryAlertDays = prefs.getInt('expiry_alert_days') ?? AppConstants.defaultExpiryAlertDays;
+        _lowStockThreshold = prefs.getInt('low_stock_threshold') ?? AppConstants.defaultLowStockThreshold;
+        _syncFrequencyHours = prefs.getInt('sync_frequency_hours') ?? 24;
+        _offlineMode = prefs.getBool('offline_mode') ?? false;
+        _hasMimsCredentials = hasCredentials;
+        _biometricEnabled = biometricEnabled;
+        _biometricAvailable = biometricAvailable;
+        _hasPin = hasPin;
+        _expiryAlertsEnabled = prefs.getBool('expiry_alerts_enabled') ?? true;
+        _lowStockAlertsEnabled = prefs.getBool('low_stock_alerts_enabled') ?? true;
+        _systemAlertsEnabled = prefs.getBool('system_alerts_enabled') ?? true;
+        _isLoading = false;
+      });
+    }
   }
 
   Future<void> _saveExpiryAlertDays(int days) async {
@@ -115,6 +165,197 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() => _offlineMode = enabled);
   }
 
+  Future<void> _toggleBiometric(bool enabled) async {
+    await _localAuth.setBiometricEnabled(enabled);
+    if (mounted) setState(() => _biometricEnabled = enabled);
+  }
+
+  Future<void> _showSetPinDialog() async {
+    final controller = TextEditingController();
+    final confirmController = TextEditingController();
+    final success = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Set PIN'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              obscureText: true,
+              maxLength: 6,
+              decoration: const InputDecoration(
+                labelText: 'Enter 4-6 digit PIN',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: confirmController,
+              keyboardType: TextInputType.number,
+              obscureText: true,
+              maxLength: 6,
+              decoration: const InputDecoration(
+                labelText: 'Confirm PIN',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final pin = controller.text;
+              if (pin.length < 4) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('PIN must be at least 4 digits')),
+                );
+                return;
+              }
+              if (pin != confirmController.text) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('PINs do not match')),
+                );
+                return;
+              }
+              await _localAuth.setPin(pin);
+              if (ctx.mounted) Navigator.pop(ctx, true);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (success == true && mounted) {
+      setState(() => _hasPin = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PIN set successfully')),
+      );
+    }
+  }
+
+  Future<void> _showChangePinDialog() async {
+    final controller = TextEditingController();
+    final newController = TextEditingController();
+    final confirmController = TextEditingController();
+    final success = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Change PIN'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              obscureText: true,
+              maxLength: 6,
+              decoration: const InputDecoration(
+                labelText: 'Current PIN',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: newController,
+              keyboardType: TextInputType.number,
+              obscureText: true,
+              maxLength: 6,
+              decoration: const InputDecoration(
+                labelText: 'New PIN',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: confirmController,
+              keyboardType: TextInputType.number,
+              obscureText: true,
+              maxLength: 6,
+              decoration: const InputDecoration(
+                labelText: 'Confirm new PIN',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final ok = await _localAuth.verifyPin(controller.text);
+              if (!ok) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('Current PIN is incorrect')),
+                );
+                return;
+              }
+              final newPin = newController.text;
+              if (newPin.length < 4) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('PIN must be at least 4 digits')),
+                );
+                return;
+              }
+              if (newPin != confirmController.text) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('New PINs do not match')),
+                );
+                return;
+              }
+              await _localAuth.setPin(newPin);
+              if (ctx.mounted) Navigator.pop(ctx, true);
+            },
+            child: const Text('Change'),
+          ),
+        ],
+      ),
+    );
+    if (success == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PIN changed successfully')),
+      );
+    }
+  }
+
+  Future<void> _removePin() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove PIN'),
+        content: const Text(
+          'Are you sure? You will no longer be prompted for PIN on app launch.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.errorRed,
+              foregroundColor: AppColors.pureWhite,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _localAuth.clearPin();
+      if (mounted) setState(() => _hasPin = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('PIN removed')),
+        );
+      }
+    }
+  }
+
   Future<void> _performSync() async {
     final result = await _syncService.sync();
     if (mounted) {
@@ -137,323 +378,12 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Future<void> _importMedications() async {
-    try {
-      // Pick XLSX file
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['xlsx', 'xls'],
-        allowMultiple: false,
-      );
-
-      if (result == null || result.files.isEmpty) {
-        return; // User cancelled
-      }
-
-      final file = result.files.first;
-      if (file.path == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('File path not available')),
-          );
-        }
-        return;
-      }
-
-      // Show confirmation dialog
-      final shouldClear = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Import Medications'),
-          content: const Text(
-            'Do you want to clear existing medications before importing?\n\n'
-            'Selecting "Yes" will replace all existing medications.\n'
-            'Selecting "No" will add/update medications from the file.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('No (Add/Update)'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Yes (Replace All)'),
-            ),
-          ],
-        ),
-      );
-
-      if (shouldClear == null) return;
-
-      // Show loading dialog
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 16),
-              const Text('Importing medications...'),
-              const SizedBox(height: 8),
-              Text(
-                'Please wait, this may take a few moments.',
-                style: Theme.of(context).textTheme.bodySmall,
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      );
-
-      // Get company code from current user
-      final authService = AuthService();
-      final companyCode = await authService.getCurrentUserCompanyCode();
-      
-      if (companyCode == null || companyCode.isEmpty) {
-        if (mounted) {
-          Navigator.pop(context); // Close loading dialog
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Please set your company code in profile settings first'),
-              backgroundColor: AppColors.errorRed,
-            ),
-          );
-        }
-        return;
-      }
-
-      // Import medications in background
-      try {
-        final importResult = await MOHDataParser.importMOHFromXLSX(
-          file.path!,
-          clearExisting: shouldClear,
-          companyCode: companyCode,
-        );
-
-        if (mounted) {
-          Navigator.pop(context); // Close loading dialog
-          _showImportResult(importResult);
-        }
-      } catch (e) {
-        if (mounted) {
-          Navigator.pop(context); // Close loading dialog
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error importing file: $e')),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        Navigator.pop(context); // Close loading dialog if open
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error importing file: $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> _syncMedicines() async {
-    // Check if user has company code
-    final companyCode = await _authService.getCurrentUserCompanyCode();
-    if (companyCode == null || companyCode.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please set your company code in profile settings first'),
-            backgroundColor: AppColors.errorRed,
-          ),
-        );
-      }
-      return;
-    }
-
-    // Show confirmation dialog
-    final shouldSync = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Sync Medicines'),
-        content: const Text(
-          'This will download all medicines from your company and update your local database.\n\n'
-          'This may take a few moments depending on the number of medicines.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.skyBlue,
-              foregroundColor: AppColors.pureWhite,
-            ),
-            child: const Text('Sync'),
-          ),
-        ],
-      ),
-    );
-
-    if (shouldSync != true) return;
-
-    // Show loading dialog
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 16),
-            const Text('Syncing medicines...'),
-            const SizedBox(height: 8),
-            Text(
-              'Please wait, this may take a few moments.',
-              style: Theme.of(context).textTheme.bodySmall,
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-
-    try {
-      final syncResult = await _medicationService.syncMedicinesFromFirestore();
-      
-      if (mounted) {
-        Navigator.pop(context); // Close loading dialog
-        
-        if (syncResult.success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                syncResult.syncedCount > 0
-                    ? 'Successfully synced ${syncResult.syncedCount} medicines from your company'
-                    : 'No new medicines to sync',
-              ),
-              backgroundColor: AppColors.successGreen,
-              duration: const Duration(seconds: 3),
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Sync failed: ${syncResult.message}'),
-              backgroundColor: AppColors.errorRed,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        Navigator.pop(context); // Close loading dialog
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error syncing medicines: $e'),
-            backgroundColor: AppColors.errorRed,
-          ),
-        );
-      }
-    }
-  }
-
-  void _showImportResult(ImportResult result) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(result.success ? 'Import Successful' : 'Import Failed'),
-        content: SingleChildScrollView(
-          child: Text(
-            result.message +
-                (result.success
-                    ? '\n\nImported: ${result.importedCount}\n'
-                        'Skipped: ${result.skippedCount}\n\n'
-                        'Note: Please pull down to refresh the medication list to see the imported items.'
-                    : ''),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _exportData() async {
-    // Show format selection dialog
-    final format = await showDialog<ExportFormat>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Select Export Format'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.table_chart),
-              title: const Text('CSV'),
-              subtitle: const Text('Comma-separated values'),
-              onTap: () => Navigator.pop(context, ExportFormat.csv),
-            ),
-            ListTile(
-              leading: const Icon(Icons.picture_as_pdf),
-              title: const Text('PDF'),
-              subtitle: const Text('Portable Document Format'),
-              onTap: () => Navigator.pop(context, ExportFormat.pdf),
-            ),
-            ListTile(
-              leading: const Icon(Icons.grid_on),
-              title: const Text('Excel'),
-              subtitle: const Text('Microsoft Excel (XLSX)'),
-              onTap: () => Navigator.pop(context, ExportFormat.excel),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (format == null) return;
-
-    // Show loading dialog
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(
-        child: CircularProgressIndicator(),
-      ),
-    );
-
-    try {
-      if (format == ExportFormat.csv) {
-        final csv = await _exportService.exportAllDataToCSV();
-        await Share.share(csv, subject: 'MedList Complete Data Export');
-      } else if (format == ExportFormat.pdf) {
-        final file = await _exportService.exportAllDataToPDF();
-        await _exportService.shareFile(file, format);
-      } else if (format == ExportFormat.excel) {
-        final file = await _exportService.exportAllDataToExcel();
-        await _exportService.shareFile(file, format);
-      }
-
-      if (mounted) {
-        Navigator.pop(context); // Close loading dialog
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Data exported as ${format.displayName}')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        Navigator.pop(context); // Close loading dialog
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error exporting data: $e')),
-        );
-      }
+    // Export functionality would go here
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Data export functionality coming soon')),
+      );
     }
   }
 
@@ -479,6 +409,96 @@ class _SettingsPageState extends State<SettingsPage> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                Card(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Account',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 16),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.logout, color: AppColors.errorRed),
+                          title: const Text(
+                            'Log out',
+                            style: TextStyle(
+                              color: AppColors.errorRed,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          onTap: _logout,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Card(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Security',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 16),
+                        if (_biometricAvailable)
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Use biometric on app launch'),
+                            subtitle: const Text('Fingerprint or face recognition'),
+                            value: _biometricEnabled,
+                            onChanged: _toggleBiometric,
+                          ),
+                        if (_biometricAvailable) const Divider(),
+                        if (_hasPin)
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.pin),
+                            title: const Text('PIN'),
+                            subtitle: const Text('Change or remove PIN'),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                TextButton(
+                                  onPressed: _showChangePinDialog,
+                                  child: const Text('Change'),
+                                ),
+                                TextButton(
+                                  onPressed: _removePin,
+                                  child: const Text('Remove'),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.pin_outlined),
+                            title: const Text('Set PIN'),
+                            subtitle: const Text('Require PIN on app launch'),
+                            trailing: ElevatedButton(
+                              onPressed: _showSetPinDialog,
+                              child: const Text('Set PIN'),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 Card(
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
@@ -547,6 +567,61 @@ class _SettingsPageState extends State<SettingsPage> {
                               },
                             ),
                           ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // Notification Toggles
+                Card(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Notification Types',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Expiry alerts'),
+                          subtitle: const Text('Notify when medications are expiring'),
+                          value: _expiryAlertsEnabled,
+                          onChanged: (v) async {
+                            final prefs = await SharedPreferences.getInstance();
+                            await prefs.setBool('expiry_alerts_enabled', v);
+                            setState(() => _expiryAlertsEnabled = v);
+                          },
+                        ),
+                        const Divider(),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Low stock alerts'),
+                          subtitle: const Text('Notify when stock is running low'),
+                          value: _lowStockAlertsEnabled,
+                          onChanged: (v) async {
+                            final prefs = await SharedPreferences.getInstance();
+                            await prefs.setBool('low_stock_alerts_enabled', v);
+                            setState(() => _lowStockAlertsEnabled = v);
+                          },
+                        ),
+                        const Divider(),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('System alerts'),
+                          subtitle: const Text('General system notifications'),
+                          value: _systemAlertsEnabled,
+                          onChanged: (v) async {
+                            final prefs = await SharedPreferences.getInstance();
+                            await prefs.setBool('system_alerts_enabled', v);
+                            setState(() => _systemAlertsEnabled = v);
+                          },
                         ),
                       ],
                     ),
@@ -680,81 +755,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                // Notification Settings
-                Card(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Notification Settings',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 16),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Expiry Alerts'),
-                          subtitle: const Text('Get notified about expiring medications'),
-                          value: _expiryAlertsEnabled,
-                          onChanged: (value) async {
-                            final prefs = await SharedPreferences.getInstance();
-                            await prefs.setBool('expiry_alerts_enabled', value);
-                            setState(() => _expiryAlertsEnabled = value);
-                          },
-                        ),
-                        const Divider(),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Low Stock Alerts'),
-                          subtitle: const Text('Get notified about low stock items'),
-                          value: _lowStockAlertsEnabled,
-                          onChanged: (value) async {
-                            final prefs = await SharedPreferences.getInstance();
-                            await prefs.setBool('low_stock_alerts_enabled', value);
-                            setState(() => _lowStockAlertsEnabled = value);
-                          },
-                        ),
-                        const Divider(),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('System Alerts'),
-                          subtitle: const Text('Get notified about system events'),
-                          value: _systemAlertsEnabled,
-                          onChanged: (value) async {
-                            final prefs = await SharedPreferences.getInstance();
-                            await prefs.setBool('system_alerts_enabled', value);
-                            setState(() => _systemAlertsEnabled = value);
-                          },
-                        ),
-                        const Divider(),
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Test Notification'),
-                          subtitle: const Text('Send a test notification'),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.notifications_active),
-                            onPressed: () async {
-                              await _notificationService.showSystemAlert(
-                                title: 'Test Notification',
-                                body: 'This is a test notification from MedList App',
-                              );
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Test notification sent')),
-                                );
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
                 // Data Management
                 Card(
                   shape: RoundedRectangleBorder(
@@ -787,26 +787,6 @@ class _SettingsPageState extends State<SettingsPage> {
                           trailing: IconButton(
                             icon: const Icon(Icons.download),
                             onPressed: _exportData,
-                          ),
-                        ),
-                        const Divider(),
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Sync Medicines'),
-                          subtitle: const Text('Download latest medicines from your company'),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.sync),
-                            onPressed: _syncMedicines,
-                          ),
-                        ),
-                        const Divider(),
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Import Medications'),
-                          subtitle: const Text('Import from MOH Price List (XLSX)'),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.upload_file),
-                            onPressed: _importMedications,
                           ),
                         ),
                       ],

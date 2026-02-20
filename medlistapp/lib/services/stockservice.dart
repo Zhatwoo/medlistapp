@@ -69,6 +69,41 @@ class StockService {
     return total < threshold;
   }
 
+  /// Batch get stock summary for filtering: total qty, isLow, isOverstocked per medication.
+  Future<Map<int, ({int total, bool isLowStock, bool isOverstocked})>> getStockSummaryForMedications(
+    List<int> medicationIds, {
+    int? lowStockThreshold,
+    double? overstockThreshold,
+  }) async {
+    if (medicationIds.isEmpty) return {};
+    final lowThresh = lowStockThreshold ?? AppConstants.defaultLowStockThreshold;
+    final overThresh = overstockThreshold ?? AppConstants.defaultOverstockThreshold;
+
+    final totals = await _dbService.getStockTotalsForMedicationIds(medicationIds);
+    final stockItems = await _dbService.getStockItemsByMedicationIds(medicationIds);
+
+    final overstockedIds = <int>{};
+    for (final item in stockItems) {
+      if (item.expectedQuantity != null && item.expectedQuantity! > 0) {
+        final ratio = item.quantity / item.expectedQuantity!;
+        if (ratio > overThresh) {
+          overstockedIds.add(item.medicationId);
+        }
+      }
+    }
+
+    final result = <int, ({int total, bool isLowStock, bool isOverstocked})>{};
+    for (final id in medicationIds) {
+      final total = totals[id] ?? 0;
+      result[id] = (
+        total: total,
+        isLowStock: total > 0 && total < lowThresh,
+        isOverstocked: overstockedIds.contains(id),
+      );
+    }
+    return result;
+  }
+
   // Get low stock items
   Future<List<StockItem>> getLowStockItems(int threshold) async {
     final all = await getAllStockItems();

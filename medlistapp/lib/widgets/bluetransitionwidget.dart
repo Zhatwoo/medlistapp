@@ -104,15 +104,6 @@ class BlueTransitionWidget extends StatelessWidget {
               child: Container(
                 decoration: BoxDecoration(
                   color: AppColors.skyBlue,
-                  // Add subtle gradient for curtain effect
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      AppColors.skyBlue,
-                      AppColors.skyBlueDark,
-                    ],
-                  ),
                   // Add shadow for depth
                   boxShadow: [
                     BoxShadow(
@@ -124,26 +115,6 @@ class BlueTransitionWidget extends StatelessWidget {
                 ),
                 child: Stack(
                   children: [
-                    // Curtain folds effect (subtle lines)
-                    ...List.generate(5, (index) {
-                      return Positioned(
-                        top: (screenHeight / 5) * index,
-                        left: 0,
-                        right: 0,
-                        height: 2,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                Colors.transparent,
-                                Colors.black.withOpacity(0.1),
-                                Colors.transparent,
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    }),
                     // Loading screen content in center
                     Center(
                       child: Opacity(

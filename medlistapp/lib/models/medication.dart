@@ -15,7 +15,9 @@ class Medication {
   final String? storageCondition;
   final bool isControlledDrug;
   final String? therapeuticCategory;
-  final String? companyCode; // Company code for multi-tenant support
+  final String? companyCode;
+  final String? supplier; // Supplier of medicine (may differ from manufacturer/company)
+  final String? gtin; // Global Trade Item Number from GS1 barcode
 
   Medication({
     this.id,
@@ -35,6 +37,8 @@ class Medication {
     this.isControlledDrug = false,
     this.therapeuticCategory,
     this.companyCode,
+    this.supplier,
+    this.gtin,
   });
 
   // Convert to Map for database
@@ -57,6 +61,8 @@ class Medication {
       'is_controlled_drug': isControlledDrug ? 1 : 0,
       'therapeutic_category': therapeuticCategory,
       'company_code': companyCode,
+      'supplier': supplier,
+      'gtin': gtin,
     };
   }
 
@@ -80,6 +86,8 @@ class Medication {
       isControlledDrug: (map['is_controlled_drug'] as int?) == 1,
       therapeuticCategory: map['therapeutic_category'] as String?,
       companyCode: map['company_code'] as String?,
+      supplier: map['supplier'] as String?,
+      gtin: map['gtin'] as String?,
     );
   }
 
@@ -108,6 +116,8 @@ class Medication {
     bool? isControlledDrug,
     String? therapeuticCategory,
     String? companyCode,
+    String? supplier,
+    String? gtin,
   }) {
     return Medication(
       id: id ?? this.id,
@@ -127,6 +137,8 @@ class Medication {
       isControlledDrug: isControlledDrug ?? this.isControlledDrug,
       therapeuticCategory: therapeuticCategory ?? this.therapeuticCategory,
       companyCode: companyCode ?? this.companyCode,
+      supplier: supplier ?? this.supplier,
+      gtin: gtin ?? this.gtin,
     );
   }
 }

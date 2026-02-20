@@ -3,7 +3,7 @@ class AppConstants {
 
   // Database
   static const String databaseName = 'medlistapp.db';
-  static const int databaseVersion = 8; // Incremented for comprehensive company code support
+  static const int databaseVersion = 7; // v7: add medications.gtin, stock_items.serial_number
 
   // Table names
   static const String tableMedications = 'medications';
@@ -18,19 +18,21 @@ class AppConstants {
   static const String tableBarcodeData = 'barcode_data';
   static const String tableNotifications = 'notifications';
   static const String tableStockAdjustments = 'stock_adjustments';
+  static const String tableUsers = 'users';
+  static const String tablePatients = 'patients';
+
+  // Notification channels
+  static const String expiryAlertChannelId = 'expiry_alert_channel';
+  static const String expiryAlertChannelName = 'Expiry Alerts';
+  static const String lowStockAlertChannelId = 'low_stock_alert_channel';
+  static const String lowStockAlertChannelName = 'Low Stock Alerts';
+  static const String systemAlertChannelId = 'system_alert_channel';
+  static const String systemAlertChannelName = 'System Alerts';
 
   // Default values
   static const int defaultExpiryAlertDays = 30;
   static const int defaultLowStockThreshold = 10;
-  static const double defaultOverstockThreshold = 2.0; // 200% of expected quantity
-
-  // Notification channels
-  static const String expiryAlertChannelId = 'expiry_alerts';
-  static const String expiryAlertChannelName = 'Expiry Alerts';
-  static const String lowStockAlertChannelId = 'low_stock_alerts';
-  static const String lowStockAlertChannelName = 'Low Stock Alerts';
-  static const String systemAlertChannelId = 'system_alerts';
-  static const String systemAlertChannelName = 'System Alerts';
+  static const int defaultOverstockThreshold = 50;
 
   // MOH Data
   static const String mohDataAssetPath = 'assets/moh_price_list.md';

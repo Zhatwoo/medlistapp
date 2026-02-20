@@ -2,6 +2,7 @@ enum ExportFormat {
   csv,
   pdf,
   excel,
+  word,
 }
 
 extension ExportFormatExtension on ExportFormat {
@@ -13,6 +14,8 @@ extension ExportFormatExtension on ExportFormat {
         return 'pdf';
       case ExportFormat.excel:
         return 'xlsx';
+      case ExportFormat.word:
+        return 'doc';
     }
   }
 
@@ -24,6 +27,8 @@ extension ExportFormatExtension on ExportFormat {
         return 'application/pdf';
       case ExportFormat.excel:
         return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      case ExportFormat.word:
+        return 'application/msword';
     }
   }
 
@@ -35,8 +40,12 @@ extension ExportFormatExtension on ExportFormat {
         return 'PDF';
       case ExportFormat.excel:
         return 'Excel';
+      case ExportFormat.word:
+        return 'Word';
     }
   }
 }
+
+
 
 

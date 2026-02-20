@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:medlistapp/utils/constants.dart';
@@ -13,6 +14,8 @@ import 'package:medlistapp/models/report.dart';
 import 'package:medlistapp/models/barcodedata.dart';
 import 'package:medlistapp/models/notification.dart';
 import 'package:medlistapp/models/stockadjustment.dart';
+import 'package:medlistapp/models/appuser.dart';
+import 'package:medlistapp/models/patient.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -39,30 +42,101 @@ class DatabaseService {
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // Add new tables for version 2
       await _createNewTables(db);
     }
+    if (oldVersion < 3) {
+      await _migrateToV3(db);
+    }
     if (oldVersion < 4) {
-      // Add notifications table for version 4
-      await _createNotificationsTable(db);
+      await _migrateToV4(db);
     }
     if (oldVersion < 5) {
-      // Add medication master data fields for version 5
-      await _addMedicationMasterDataFields(db);
+      await _migrateToV5(db);
     }
     if (oldVersion < 6) {
-      // Add stock management enhancements for version 6
-      await _addStockManagementFields(db);
-      await _createStockAdjustmentsTable(db);
+      await _migrateToV6(db);
     }
     if (oldVersion < 7) {
-      // Add company_code field for multi-tenant support
-      await _addCompanyCodeField(db);
+      await _migrateToV7(db);
     }
-    if (oldVersion < 8) {
-      // Add company_code to stock_items and other tables
-      await _addCompanyCodeToStockItems(db);
-    }
+  }
+
+  Future<void> _migrateToV7(Database db) async {
+    try {
+      await db.execute('ALTER TABLE ${AppConstants.tableMedications} ADD COLUMN gtin TEXT');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE ${AppConstants.tableStockItems} ADD COLUMN serial_number TEXT');
+    } catch (_) {}
+  }
+
+  Future<void> _migrateToV6(Database db) async {
+    try {
+      await db.execute('ALTER TABLE ${AppConstants.tableNotifications} ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0');
+    } catch (_) {}
+  }
+
+  Future<void> _migrateToV5(Database db) async {
+    try {
+      await db.execute('ALTER TABLE ${AppConstants.tablePatients} ADD COLUMN medications TEXT');
+    } catch (_) {}
+  }
+
+  Future<void> _migrateToV4(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${AppConstants.tableUsers} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        firebase_uid TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'pharmacist',
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${AppConstants.tablePatients} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        age INTEGER,
+        gender TEXT,
+        weight REAL,
+        allergies TEXT,
+        conditions TEXT,
+        medications TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+      )
+    ''');
+  }
+
+  Future<void> _migrateToV3(Database db) async {
+    // Add columns to medications
+    try {
+      await db.execute('ALTER TABLE ${AppConstants.tableMedications} ADD COLUMN storage_condition TEXT');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE ${AppConstants.tableMedications} ADD COLUMN is_controlled_drug INTEGER DEFAULT 0');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE ${AppConstants.tableMedications} ADD COLUMN therapeutic_category TEXT');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE ${AppConstants.tableMedications} ADD COLUMN supplier TEXT');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE ${AppConstants.tableMedications} ADD COLUMN company_code TEXT');
+    } catch (_) {}
+    // Add columns to stock_items
+    try {
+      await db.execute('ALTER TABLE ${AppConstants.tableStockItems} ADD COLUMN manufacturing_date TEXT');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE ${AppConstants.tableStockItems} ADD COLUMN expected_quantity INTEGER');
+    } catch (_) {}
+    try {
+      await db.execute('ALTER TABLE ${AppConstants.tableStockItems} ADD COLUMN company_code TEXT');
+    } catch (_) {}
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -85,7 +159,9 @@ class DatabaseService {
         storage_condition TEXT,
         is_controlled_drug INTEGER DEFAULT 0,
         therapeutic_category TEXT,
-        company_code TEXT
+        company_code TEXT,
+        supplier TEXT,
+        gtin TEXT
       )
     ''');
 
@@ -102,6 +178,7 @@ class DatabaseService {
         manufacturing_date TEXT,
         expected_quantity INTEGER,
         company_code TEXT,
+        serial_number TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT,
         FOREIGN KEY (medication_id) REFERENCES ${AppConstants.tableMedications}(id) ON DELETE CASCADE
@@ -138,10 +215,6 @@ class DatabaseService {
     
     // Create new tables
     await _createNewTables(db);
-    // Create notifications table
-    await _createNotificationsTable(db);
-    // Create stock adjustments table
-    await _createStockAdjustmentsTable(db);
   }
 
   Future<void> _createNewTables(Database db) async {
@@ -260,6 +333,61 @@ class DatabaseService {
       )
     ''');
 
+    // Notifications table
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${AppConstants.tableNotifications} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        data TEXT,
+        is_read INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    // Stock adjustments table
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${AppConstants.tableStockAdjustments} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        stock_item_id INTEGER NOT NULL,
+        adjustment_type TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        reason TEXT,
+        adjusted_at TEXT NOT NULL,
+        FOREIGN KEY (stock_item_id) REFERENCES ${AppConstants.tableStockItems}(id) ON DELETE CASCADE
+      )
+    ''');
+
+    // Users table
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${AppConstants.tableUsers} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        firebase_uid TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'pharmacist',
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    // Patients table
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${AppConstants.tablePatients} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        age INTEGER,
+        gender TEXT,
+        weight REAL,
+        allergies TEXT,
+        conditions TEXT,
+        medications TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+      )
+    ''');
+
     // Create indexes for new tables
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_verification_medication_id 
@@ -287,148 +415,6 @@ class DatabaseService {
     ''');
   }
 
-
-  Future<void> _createNotificationsTable(Database db) async {
-    // Notifications table
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS ${AppConstants.tableNotifications} (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        type TEXT NOT NULL,
-        title TEXT NOT NULL,
-        body TEXT NOT NULL,
-        data TEXT,
-        scheduled_at TEXT,
-        sent_at TEXT,
-        created_at TEXT NOT NULL
-      )
-    ''');
-
-    // Create indexes for notifications
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_notification_type 
-      ON ${AppConstants.tableNotifications}(type)
-    ''');
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_notification_created_at 
-      ON ${AppConstants.tableNotifications}(created_at)
-    ''');
-  }
-
-  Future<void> _addMedicationMasterDataFields(Database db) async {
-    // Add storage_condition column
-    try {
-      await db.execute('''
-        ALTER TABLE ${AppConstants.tableMedications}
-        ADD COLUMN storage_condition TEXT
-      ''');
-    } catch (e) {
-      // Column might already exist, ignore error
-    }
-
-    // Add is_controlled_drug column
-    try {
-      await db.execute('''
-        ALTER TABLE ${AppConstants.tableMedications}
-        ADD COLUMN is_controlled_drug INTEGER DEFAULT 0
-      ''');
-    } catch (e) {
-      // Column might already exist, ignore error
-    }
-
-    // Add therapeutic_category column
-    try {
-      await db.execute('''
-        ALTER TABLE ${AppConstants.tableMedications}
-        ADD COLUMN therapeutic_category TEXT
-      ''');
-    } catch (e) {
-      // Column might already exist, ignore error
-    }
-  }
-
-  Future<void> _addStockManagementFields(Database db) async {
-    // Add manufacturing_date column
-    try {
-      await db.execute('''
-        ALTER TABLE ${AppConstants.tableStockItems}
-        ADD COLUMN manufacturing_date TEXT
-      ''');
-    } catch (e) {
-      // Column might already exist, ignore error
-    }
-
-    // Add expected_quantity column
-    try {
-      await db.execute('''
-        ALTER TABLE ${AppConstants.tableStockItems}
-        ADD COLUMN expected_quantity INTEGER
-      ''');
-    } catch (e) {
-      // Column might already exist, ignore error
-    }
-  }
-
-  Future<void> _createStockAdjustmentsTable(Database db) async {
-    // Stock adjustments table
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS ${AppConstants.tableStockAdjustments} (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        stock_item_id INTEGER NOT NULL,
-        old_quantity INTEGER NOT NULL,
-        new_quantity INTEGER NOT NULL,
-        reason TEXT NOT NULL,
-        notes TEXT,
-        adjusted_at TEXT NOT NULL,
-        adjusted_by TEXT,
-        FOREIGN KEY (stock_item_id) REFERENCES ${AppConstants.tableStockItems}(id) ON DELETE CASCADE
-      )
-    ''');
-
-    // Create indexes for stock adjustments
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_stock_adjustment_item_id 
-      ON ${AppConstants.tableStockAdjustments}(stock_item_id)
-    ''');
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_stock_adjustment_date 
-      ON ${AppConstants.tableStockAdjustments}(adjusted_at)
-    ''');
-  }
-
-  Future<void> _addCompanyCodeField(Database db) async {
-    // Add company_code column to medications table
-    try {
-      await db.execute('''
-        ALTER TABLE ${AppConstants.tableMedications}
-        ADD COLUMN company_code TEXT
-      ''');
-    } catch (e) {
-      // Column might already exist, ignore error
-    }
-  }
-
-  Future<void> _addCompanyCodeToStockItems(Database db) async {
-    // Add company_code column to stock_items table
-    try {
-      await db.execute('''
-        ALTER TABLE ${AppConstants.tableStockItems}
-        ADD COLUMN company_code TEXT
-      ''');
-      
-      // Update existing stock items with company_code from their medications
-      await db.execute('''
-        UPDATE ${AppConstants.tableStockItems}
-        SET company_code = (
-          SELECT company_code 
-          FROM ${AppConstants.tableMedications} 
-          WHERE ${AppConstants.tableMedications}.id = ${AppConstants.tableStockItems}.medication_id
-        )
-      ''');
-    } catch (e) {
-      // Column might already exist, ignore error
-    }
-  }
-
   // Medications CRUD
   Future<int> insertMedication(Medication medication) async {
     final db = await database;
@@ -439,18 +425,9 @@ class DatabaseService {
     );
   }
 
-  Future<List<Medication>> getAllMedications({String? companyCode}) async {
+  Future<List<Medication>> getAllMedications() async {
     final db = await database;
-    final List<Map<String, dynamic>> maps;
-    if (companyCode != null && companyCode.isNotEmpty) {
-      maps = await db.query(
-        AppConstants.tableMedications,
-        where: 'company_code = ? OR company_code IS NULL',
-        whereArgs: [companyCode],
-      );
-    } else {
-      maps = await db.query(AppConstants.tableMedications);
-    }
+    final List<Map<String, dynamic>> maps = await db.query(AppConstants.tableMedications);
     return List.generate(maps.length, (i) => Medication.fromMap(maps[i]));
   }
 
@@ -465,22 +442,35 @@ class DatabaseService {
     return Medication.fromMap(maps.first);
   }
 
-  Future<List<Medication>> searchMedications(String query, {String? companyCode}) async {
+  Future<Medication?> getMedicationByGtin(String gtin) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps;
-    if (companyCode != null && companyCode.isNotEmpty) {
-      maps = await db.query(
-        AppConstants.tableMedications,
-        where: '(trade_name LIKE ? OR active_ingredient LIKE ? OR company LIKE ?) AND (company_code = ? OR company_code IS NULL)',
-        whereArgs: ['%$query%', '%$query%', '%$query%', companyCode],
-      );
-    } else {
-      maps = await db.query(
-        AppConstants.tableMedications,
-        where: 'trade_name LIKE ? OR active_ingredient LIKE ? OR company LIKE ?',
-        whereArgs: ['%$query%', '%$query%', '%$query%'],
-      );
-    }
+    final List<Map<String, dynamic>> maps = await db.query(
+      AppConstants.tableMedications,
+      where: 'gtin = ?',
+      whereArgs: [gtin],
+      limit: 1,
+    );
+    if (maps.isEmpty) return null;
+    return Medication.fromMap(maps.first);
+  }
+
+  Future<void> updateMedicationGtin(int medicationId, String gtin) async {
+    final db = await database;
+    await db.update(
+      AppConstants.tableMedications,
+      {'gtin': gtin},
+      where: 'id = ?',
+      whereArgs: [medicationId],
+    );
+  }
+
+  Future<List<Medication>> searchMedications(String query) async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      AppConstants.tableMedications,
+      where: 'trade_name LIKE ? OR active_ingredient LIKE ? OR company LIKE ?',
+      whereArgs: ['%$query%', '%$query%', '%$query%'],
+    );
     return List.generate(maps.length, (i) => Medication.fromMap(maps[i]));
   }
 
@@ -503,9 +493,90 @@ class DatabaseService {
     );
   }
 
-  Future<int> deleteAllMedications() async {
+  // Users CRUD
+  Future<int> insertUser(AppUser user) async {
     final db = await database;
-    return await db.delete(AppConstants.tableMedications);
+    return await db.insert(
+      AppConstants.tableUsers,
+      user.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<AppUser?> getUserByFirebaseUid(String firebaseUid) async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      AppConstants.tableUsers,
+      where: 'firebase_uid = ?',
+      whereArgs: [firebaseUid],
+    );
+    if (maps.isEmpty) return null;
+    return AppUser.fromMap(maps.first);
+  }
+
+  Future<int> updateUser(AppUser user) async {
+    final db = await database;
+    return await db.update(
+      AppConstants.tableUsers,
+      user.toMap(),
+      where: 'id = ?',
+      whereArgs: [user.id],
+    );
+  }
+
+  Future<List<AppUser>> getAllUsers() async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(AppConstants.tableUsers);
+    return List.generate(maps.length, (i) => AppUser.fromMap(maps[i]));
+  }
+
+  // Patients CRUD
+  Future<int> insertPatient(Patient patient) async {
+    final db = await database;
+    return await db.insert(
+      AppConstants.tablePatients,
+      patient.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<Patient>> getAllPatients() async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      AppConstants.tablePatients,
+      orderBy: 'name ASC',
+    );
+    return List.generate(maps.length, (i) => Patient.fromMap(maps[i]));
+  }
+
+  Future<Patient?> getPatientById(int id) async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      AppConstants.tablePatients,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (maps.isEmpty) return null;
+    return Patient.fromMap(maps.first);
+  }
+
+  Future<int> updatePatient(Patient patient) async {
+    final db = await database;
+    return await db.update(
+      AppConstants.tablePatients,
+      patient.toMap(),
+      where: 'id = ?',
+      whereArgs: [patient.id],
+    );
+  }
+
+  Future<int> deletePatient(int id) async {
+    final db = await database;
+    return await db.delete(
+      AppConstants.tablePatients,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   // Stock Items CRUD
@@ -520,35 +591,25 @@ class DatabaseService {
 
   Future<List<StockItem>> getAllStockItems({String? companyCode}) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps;
-    if (companyCode != null && companyCode.isNotEmpty) {
-      maps = await db.query(
-        AppConstants.tableStockItems,
-        where: 'company_code = ? OR company_code IS NULL',
-        whereArgs: [companyCode],
-      );
-    } else {
-      maps = await db.query(AppConstants.tableStockItems);
+    final maps = await db.query(AppConstants.tableStockItems);
+    final items = <StockItem>[];
+    for (final map in maps) {
+      try {
+        items.add(StockItem.fromMap(map));
+      } catch (e) {
+        debugPrint('Skipping bad stock row id=${map['id']}: $e');
+      }
     }
-    return List.generate(maps.length, (i) => StockItem.fromMap(maps[i]));
+    return items;
   }
 
   Future<List<StockItem>> getStockItemsByMedicationId(int medicationId, {String? companyCode}) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps;
-    if (companyCode != null && companyCode.isNotEmpty) {
-      maps = await db.query(
-        AppConstants.tableStockItems,
-        where: 'medication_id = ? AND (company_code = ? OR company_code IS NULL)',
-        whereArgs: [medicationId, companyCode],
-      );
-    } else {
-      maps = await db.query(
-        AppConstants.tableStockItems,
-        where: 'medication_id = ?',
-        whereArgs: [medicationId],
-      );
-    }
+    final List<Map<String, dynamic>> maps = await db.query(
+      AppConstants.tableStockItems,
+      where: 'medication_id = ?',
+      whereArgs: [medicationId],
+    );
     return List.generate(maps.length, (i) => StockItem.fromMap(maps[i]));
   }
 
@@ -582,47 +643,6 @@ class DatabaseService {
     );
   }
 
-  // Stock Adjustments CRUD
-  Future<int> insertStockAdjustment(StockAdjustment adjustment) async {
-    final db = await database;
-    return await db.insert(
-      AppConstants.tableStockAdjustments,
-      adjustment.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-  }
-
-  Future<List<StockAdjustment>> getAllStockAdjustments() async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      AppConstants.tableStockAdjustments,
-      orderBy: 'adjusted_at DESC',
-    );
-    return List.generate(maps.length, (i) => StockAdjustment.fromMap(maps[i]));
-  }
-
-  Future<List<StockAdjustment>> getStockAdjustmentsByStockItemId(int stockItemId) async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      AppConstants.tableStockAdjustments,
-      where: 'stock_item_id = ?',
-      whereArgs: [stockItemId],
-      orderBy: 'adjusted_at DESC',
-    );
-    return List.generate(maps.length, (i) => StockAdjustment.fromMap(maps[i]));
-  }
-
-  Future<StockAdjustment?> getStockAdjustmentById(int id) async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      AppConstants.tableStockAdjustments,
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-    if (maps.isEmpty) return null;
-    return StockAdjustment.fromMap(maps.first);
-  }
-
   // Expiry Records CRUD
   Future<int> insertExpiryRecord(ExpiryRecord record) async {
     final db = await database;
@@ -649,32 +669,50 @@ class DatabaseService {
     return List.generate(maps.length, (i) => ExpiryRecord.fromMap(maps[i]));
   }
 
-  Future<int> updateExpiryRecord(ExpiryRecord record) async {
-    final db = await database;
-    return await db.update(
-      AppConstants.tableExpiryRecords,
-      record.toMap(),
-      where: 'id = ?',
-      whereArgs: [record.id],
-    );
-  }
-
   // Get total stock quantity for a medication
   Future<int> getTotalStockQuantity(int medicationId, {String? companyCode}) async {
     final db = await database;
-    final result;
-    if (companyCode != null && companyCode.isNotEmpty) {
-      result = await db.rawQuery(
-        'SELECT SUM(quantity) as total FROM ${AppConstants.tableStockItems} WHERE medication_id = ? AND (company_code = ? OR company_code IS NULL)',
-        [medicationId, companyCode],
-      );
-    } else {
-      result = await db.rawQuery(
-        'SELECT SUM(quantity) as total FROM ${AppConstants.tableStockItems} WHERE medication_id = ?',
-        [medicationId],
-      );
-    }
+    final result = await db.rawQuery(
+      'SELECT SUM(quantity) as total FROM ${AppConstants.tableStockItems} WHERE medication_id = ?',
+      [medicationId],
+    );
     return result.first['total'] as int? ?? 0;
+  }
+
+  /// Batch get total stock quantity for multiple medications. Returns Map<medicationId, totalQuantity>.
+  Future<Map<int, int>> getStockTotalsForMedicationIds(List<int> medicationIds) async {
+    if (medicationIds.isEmpty) return {};
+    final db = await database;
+    final placeholders = List.filled(medicationIds.length, '?').join(',');
+    final result = await db.rawQuery(
+      'SELECT medication_id, SUM(quantity) as total FROM ${AppConstants.tableStockItems} WHERE medication_id IN ($placeholders) GROUP BY medication_id',
+      medicationIds.map((id) => id).toList(),
+    );
+    final map = <int, int>{};
+    for (final row in result) {
+      final medId = row['medication_id'] as int?;
+      final total = row['total'];
+      if (medId != null) {
+        map[medId] = total is int ? total : (total as num?)?.toInt() ?? 0;
+      }
+    }
+    for (final id in medicationIds) {
+      map.putIfAbsent(id, () => 0);
+    }
+    return map;
+  }
+
+  /// Get all stock items for the given medication IDs (for overstock calculation).
+  Future<List<StockItem>> getStockItemsByMedicationIds(List<int> medicationIds) async {
+    if (medicationIds.isEmpty) return [];
+    final db = await database;
+    final placeholders = List.filled(medicationIds.length, '?').join(',');
+    final maps = await db.query(
+      AppConstants.tableStockItems,
+      where: 'medication_id IN ($placeholders)',
+      whereArgs: medicationIds,
+    );
+    return maps.map((m) => StockItem.fromMap(m)).toList();
   }
 
   // Verification Results CRUD
@@ -858,60 +896,89 @@ class DatabaseService {
   // Notifications CRUD
   Future<int> insertNotification(AppNotification notification) async {
     final db = await database;
-    return await db.insert(
-      AppConstants.tableNotifications,
-      notification.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-  }
-
-  Future<List<AppNotification>> getAllNotifications() async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      AppConstants.tableNotifications,
-      orderBy: 'created_at DESC',
-    );
-    return List.generate(maps.length, (i) => AppNotification.fromMap(maps[i]));
+    return await db.insert(AppConstants.tableNotifications, notification.toMap());
   }
 
   Future<List<AppNotification>> getNotificationsByType(NotificationType type) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      AppConstants.tableNotifications,
-      where: 'type = ?',
-      whereArgs: [type.name],
-      orderBy: 'created_at DESC',
-    );
-    return List.generate(maps.length, (i) => AppNotification.fromMap(maps[i]));
+    final maps = await db.query(AppConstants.tableNotifications, where: 'type = ?', whereArgs: [type.name], orderBy: 'created_at DESC');
+    return maps.map((m) => AppNotification.fromMap(m)).toList();
   }
 
-  Future<AppNotification?> getNotificationById(int id) async {
+  Future<List<AppNotification>> getAllNotifications() async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      AppConstants.tableNotifications,
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-    if (maps.isEmpty) return null;
-    return AppNotification.fromMap(maps.first);
+    final maps = await db.query(AppConstants.tableNotifications, orderBy: 'created_at DESC');
+    return maps.map((m) => AppNotification.fromMap(m)).toList();
   }
 
-  Future<int> updateNotification(AppNotification notification) async {
+  Future<int> getUnreadNotificationCount() async {
+    try {
+      final db = await database;
+      final result = await db.rawQuery(
+        'SELECT COUNT(*) as cnt FROM ${AppConstants.tableNotifications} WHERE is_read = 0',
+      );
+      return result.first['cnt'] as int? ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<void> markAllNotificationsAsRead() async {
+    final db = await database;
+    await db.update(
+      AppConstants.tableNotifications,
+      {'is_read': 1},
+      where: 'is_read = 0',
+    );
+  }
+
+  Future<void> markNotificationsAsReadByCategory(String category) async {
+    final db = await database;
+    await db.rawUpdate(
+      "UPDATE ${AppConstants.tableNotifications} SET is_read = 1 WHERE is_read = 0 AND data LIKE ?",
+      ['%"category":"$category"%'],
+    );
+  }
+
+  Future<int> getUnreadCountByCategory(String category) async {
+    try {
+      final db = await database;
+      final result = await db.rawQuery(
+        "SELECT COUNT(*) as cnt FROM ${AppConstants.tableNotifications} WHERE is_read = 0 AND data LIKE ?",
+        ['%"category":"$category"%'],
+      );
+      return result.first['cnt'] as int? ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  // Stock Adjustments CRUD
+  Future<int> insertStockAdjustment(StockAdjustment adjustment) async {
+    final db = await database;
+    return await db.insert(AppConstants.tableStockAdjustments, adjustment.toMap());
+  }
+
+  Future<List<StockAdjustment>> getStockAdjustmentsByStockItemId(int stockItemId) async {
+    final db = await database;
+    final maps = await db.query(AppConstants.tableStockAdjustments, where: 'stock_item_id = ?', whereArgs: [stockItemId], orderBy: 'adjusted_at DESC');
+    return maps.map((m) => StockAdjustment.fromMap(m)).toList();
+  }
+
+  Future<List<StockAdjustment>> getAllStockAdjustments() async {
+    final db = await database;
+    final maps = await db.query(AppConstants.tableStockAdjustments, orderBy: 'adjusted_at DESC');
+    return maps.map((m) => StockAdjustment.fromMap(m)).toList();
+  }
+
+  // Update Expiry Record
+  Future<int> updateExpiryRecord(ExpiryRecord record) async {
     final db = await database;
     return await db.update(
-      AppConstants.tableNotifications,
-      notification.toMap(),
+      AppConstants.tableExpiryRecords,
+      record.toMap(),
       where: 'id = ?',
-      whereArgs: [notification.id],
-    );
-  }
-
-  Future<int> deleteNotification(int id) async {
-    final db = await database;
-    return await db.delete(
-      AppConstants.tableNotifications,
-      where: 'id = ?',
-      whereArgs: [id],
+      whereArgs: [record.id],
     );
   }
 

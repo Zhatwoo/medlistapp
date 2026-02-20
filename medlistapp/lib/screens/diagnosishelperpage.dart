@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:medlistapp/models/patient.dart';
 import 'package:medlistapp/services/diagnosishelperservice.dart';
 import 'package:medlistapp/models/medication.dart';
 import 'package:medlistapp/utils/appcolors.dart';
-import 'package:medlistapp/widgets/clinicaldisclaimerwidget.dart';
 import 'package:medlistapp/screens/medicationdetailpage.dart';
+import 'package:medlistapp/screens/patientlistpage.dart';
 
 class DiagnosisHelperPage extends StatefulWidget {
-  const DiagnosisHelperPage({super.key});
+  final Patient? initialPatient;
+
+  const DiagnosisHelperPage({super.key, this.initialPatient});
 
   @override
   State<DiagnosisHelperPage> createState() => _DiagnosisHelperPageState();
@@ -18,15 +21,27 @@ class _DiagnosisHelperPageState extends State<DiagnosisHelperPage> {
   final List<String> _symptoms = [];
   final List<String> _currentMedications = [];
   final List<String> _allergies = [];
+  final List<String> _conditions = [];
+  Patient? _selectedPatient;
   List<MedicationRecommendation> _recommendations = [];
   bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialPatient != null) {
+      _selectedPatient = widget.initialPatient;
+      _allergies.addAll(_selectedPatient!.allergies);
+      _currentMedications.addAll(_selectedPatient!.medications);
+      _conditions.addAll(_selectedPatient!.conditions);
+    }
+  }
 
   @override
   void dispose() {
     _symptomController.dispose();
     super.dispose();
   }
-
 
   Future<void> _getRecommendations() async {
     if (_symptoms.isEmpty) {
@@ -72,8 +87,101 @@ class _DiagnosisHelperPageState extends State<DiagnosisHelperPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Clinical Disclaimer
-            const ClinicalDisclaimerWidget(padding: EdgeInsets.zero),
+            // Disclaimer
+            Card(
+              color: AppColors.warningOrange.withOpacity(0.1),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning, color: AppColors.warningOrange),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'This is an assistive tool only. Always consult a healthcare professional for proper diagnosis and treatment.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.deepNavy,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            // Patient selector
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Patient profile',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final p = await Navigator.push<Patient>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const PatientListPage(selectMode: true),
+                      ),
+                    );
+                    if (p != null && mounted) {
+                      setState(() {
+                        _selectedPatient = p;
+                        _allergies
+                          ..clear()
+                          ..addAll(p.allergies);
+                        _currentMedications
+                          ..clear()
+                          ..addAll(p.medications);
+                        _conditions
+                          ..clear()
+                          ..addAll(p.conditions);
+                      });
+                    }
+                  },
+                  icon: const Icon(Icons.people, size: 18),
+                  label: Text(_selectedPatient?.name ?? 'Select patient'),
+                ),
+              ],
+            ),
+            if (_selectedPatient != null) ...[
+              const SizedBox(height: 8),
+              Card(
+                color: AppColors.softBlue.withOpacity(0.5),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _selectedPatient!.name,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      if (_allergies.isNotEmpty)
+                        Text(
+                          'Allergies: ${_allergies.join(", ")}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      if (_currentMedications.isNotEmpty)
+                        Text(
+                          'Medications: ${_currentMedications.join(", ")}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      if (_conditions.isNotEmpty)
+                        Text(
+                          'Conditions: ${_conditions.join(", ")}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             const SizedBox(height: 16),
             // Symptoms input
             Text(
@@ -127,52 +235,6 @@ class _DiagnosisHelperPageState extends State<DiagnosisHelperPage> {
               ),
             ],
             const SizedBox(height: 16),
-            // Current Medications (if needed, can be enhanced later)
-            if (_currentMedications.isNotEmpty) ...[
-              Text(
-                'Current Medications',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: _currentMedications.map((med) {
-                  return Chip(
-                    label: Text(med),
-                    onDeleted: () {
-                      setState(() => _currentMedications.remove(med));
-                    },
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 16),
-            ],
-            // Allergies (pre-populated from patient if selected)
-            if (_allergies.isNotEmpty) ...[
-              Text(
-                'Allergies',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: _allergies.map((allergy) {
-                  return Chip(
-                    label: Text(allergy),
-                    backgroundColor: AppColors.errorRedLight,
-                    labelStyle: TextStyle(
-                      color: AppColors.errorRed,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    deleteIcon: Icon(Icons.close, size: 18, color: AppColors.errorRed),
-                    onDeleted: () {
-                      setState(() => _allergies.remove(allergy));
-                    },
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 16),
-            ],
             // Get recommendations button
             SizedBox(
               width: double.infinity,

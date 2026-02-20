@@ -12,25 +12,25 @@ class ExpiryService {
   final MedicationService _medicationService = MedicationService();
   final StockService _stockService = StockService();
 
-  // Get expiring medications (within specified days)
+  // Get expiring medications (within specified days, not yet expired)
   Future<List<StockItem>> getExpiringMedications([int days = 30]) async {
     final all = await _stockService.getAllStockItems();
-    final now = DateTime.now();
-    
-    return all.where((item) {
-      final daysUntilExpiry = item.expiryDate.difference(now).inDays;
-      return daysUntilExpiry >= 0 && daysUntilExpiry <= days;
-    }).toList();
+    return all.where((item) => item.daysUntilExpiry >= 0 && item.daysUntilExpiry <= days).toList();
   }
 
   // Get expired medications
   Future<List<StockItem>> getExpiredMedications() async {
     final all = await _stockService.getAllStockItems();
-    final now = DateTime.now();
-    
-    return all.where((item) {
-      return item.expiryDate.isBefore(now);
-    }).toList();
+    return all.where((item) => item.isExpired).toList();
+  }
+
+  /// Returns items needing expiry attention: expired + expiring within [days].
+  /// Fetches stock items once and filters in memory.
+  Future<List<StockItem>> getExpiryAlerts([int days = 30]) async {
+    final all = await _stockService.getAllStockItems();
+    final expired = all.where((i) => i.isExpired).toList();
+    final expiring = all.where((i) => i.daysUntilExpiry >= 0 && i.daysUntilExpiry <= days).toList();
+    return [...expired, ...expiring];
   }
 
   // Get expiring medications within alert threshold
@@ -52,10 +52,9 @@ class ExpiryService {
   // Check and create expiry records for all stock items
   Future<void> checkAllExpiryRecords() async {
     final allStockItems = await _dbService.getAllStockItems();
-    final now = DateTime.now();
     
     for (final item in allStockItems) {
-      final daysUntilExpiry = item.expiryDate.difference(now).inDays;
+      final daysUntilExpiry = item.daysUntilExpiry;
       final isExpired = daysUntilExpiry < 0;
       
       // Check if record already exists

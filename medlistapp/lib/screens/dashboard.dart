@@ -3,24 +3,32 @@ import 'package:medlistapp/widgets/dashboardstatcard.dart';
 import 'package:medlistapp/widgets/searchbarwidget.dart';
 import 'package:medlistapp/widgets/expiryalertcard.dart';
 import 'package:medlistapp/widgets/categorygridwidget.dart';
+import 'package:medlistapp/services/authservice.dart';
 import 'package:medlistapp/services/medicationservice.dart';
 import 'package:medlistapp/services/stockservice.dart';
 import 'package:medlistapp/services/expiryservice.dart';
 import 'package:medlistapp/services/verificationservice.dart';
 import 'package:medlistapp/services/auditservice.dart';
 import 'package:medlistapp/services/interactionservice.dart';
-import 'package:medlistapp/services/authservice.dart';
 import 'package:medlistapp/models/medication.dart';
 import 'package:medlistapp/models/stockitem.dart';
 import 'package:medlistapp/models/verificationresult.dart';
 import 'package:medlistapp/models/druginteraction.dart';
 import 'package:medlistapp/screens/medicationlistpage.dart';
 import 'package:medlistapp/screens/expirymanagementpage.dart';
-import 'package:medlistapp/screens/quickexpirycheckpage.dart';
 import 'package:medlistapp/screens/stockreconciliationpage.dart';
 import 'package:medlistapp/screens/categoriespage.dart';
 import 'package:medlistapp/screens/medicationverificationpage.dart';
+import 'package:medlistapp/screens/profilesettingspage.dart';
+import 'package:medlistapp/screens/patientlistpage.dart';
+import 'package:medlistapp/screens/diagnosishelperpage.dart';
+import 'package:medlistapp/screens/reportspage.dart';
+import 'package:medlistapp/screens/addeditmedicationpage.dart';
+import 'package:medlistapp/models/userrole.dart';
+import 'package:medlistapp/services/notificationservice.dart';
 import 'package:medlistapp/utils/appcolors.dart';
+import 'package:medlistapp/utils/constants.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class Dashboard extends StatefulWidget {
   const Dashboard({super.key});
@@ -30,13 +38,13 @@ class Dashboard extends StatefulWidget {
 }
 
 class _DashboardState extends State<Dashboard> {
+  final AuthService _authService = AuthService();
   final MedicationService _medicationService = MedicationService();
   final StockService _stockService = StockService();
   final ExpiryService _expiryService = ExpiryService();
   final VerificationService _verificationService = VerificationService();
   final AuditService _auditService = AuditService();
   final InteractionService _interactionService = InteractionService();
-  final AuthService _authService = AuthService();
   final TextEditingController _searchController = TextEditingController();
 
   int _totalMedications = 0;
@@ -50,71 +58,43 @@ class _DashboardState extends State<Dashboard> {
   List<VerificationResult> _recentVerificationLogs = [];
   List<DrugInteraction> _recentInteractions = [];
   bool _isLoading = true;
-  
-  // User profile data
-  String? _userDisplayName;
-  String? _userPhotoUrl;
-  String? _userEmail;
+  UserRole _role = UserRole.pharmacist;
+  int _unreadNotifications = 0;
+  final NotificationService _notificationService = NotificationService();
+
+  String get _userDisplayName {
+    final user = _authService.currentUser;
+    if (user == null) return 'Guest';
+    try {
+      final name = (user as dynamic).displayName as String?;
+      return (name != null && name.isNotEmpty) ? name : (user as dynamic).email ?? 'User';
+    } catch (_) {
+      return 'User';
+    }
+  }
 
   @override
   void initState() {
     super.initState();
-    _loadUserProfile();
     _loadDashboardData();
-  }
-
-  Future<void> _loadUserProfile() async {
-    try {
-      final user = _authService.currentUser;
-      if (user != null) {
-        setState(() {
-          _userDisplayName = user.displayName;
-          _userPhotoUrl = user.photoURL;
-          _userEmail = user.email;
-        });
-
-        // Try to get user profile from Firestore if display name is not available
-        if (_userDisplayName == null || _userDisplayName!.isEmpty) {
-          try {
-            final userData = await _authService.getUserProfile();
-            if (userData != null) {
-              setState(() {
-                _userDisplayName = userData['displayName'] as String? ?? _userEmail?.split('@')[0] ?? 'User';
-                _userPhotoUrl = userData['photoURL'] as String? ?? _userPhotoUrl;
-              });
-            }
-          } catch (e) {
-            // If Firestore fails, use email as fallback
-            if (_userDisplayName == null || _userDisplayName!.isEmpty) {
-              setState(() {
-                _userDisplayName = _userEmail?.split('@')[0] ?? 'User';
-              });
-            }
-          }
-        }
-
-        // Fallback to email username if still no display name
-        if (_userDisplayName == null || _userDisplayName!.isEmpty) {
-          setState(() {
-            _userDisplayName = _userEmail?.split('@')[0] ?? 'User';
-          });
-        }
-      }
-    } catch (e) {
-      print('Error loading user profile: $e');
-      // Set default values
-      setState(() {
-        _userDisplayName = 'User';
-      });
-    }
   }
 
   Future<void> _loadDashboardData() async {
     setState(() => _isLoading = true);
     try {
+      final role = await _authService.getUserRole();
+      final unread = await _notificationService.getUnreadCount();
+      if (mounted) {
+        setState(() {
+          _role = role;
+          _unreadNotifications = unread;
+        });
+      }
       final medications = await _medicationService.getAllMedications();
       final stockItems = await _stockService.getAllStockItems();
-      final expiringItems = await _expiryService.getExpiringIn30Days();
+      final prefs = await SharedPreferences.getInstance();
+      final alertDays = prefs.getInt('expiry_alert_days') ?? AppConstants.defaultExpiryAlertDays;
+      final expiringItems = await _expiryService.getExpiryAlerts(alertDays);
       final lowStockItems = await _stockService.getLowStockItems(10);
       final recentVerifications = await _verificationService.getRecentVerifications(limit: 5);
       final mimsLogs = await _auditService.getAuditLogs(actionType: 'mims_access');
@@ -144,6 +124,11 @@ class _DashboardState extends State<Dashboard> {
         );
       }
     }
+  }
+
+  Future<void> _refreshUnreadCount() async {
+    final unread = await _notificationService.getUnreadCount();
+    if (mounted) setState(() => _unreadNotifications = unread);
   }
 
   @override
@@ -185,79 +170,76 @@ class _DashboardState extends State<Dashboard> {
                         children: [
                           Row(
                             children: [
-                              // Profile Picture or Avatar
-                              Container(
-                                width: 60,
-                                height: 60,
-                                decoration: BoxDecoration(
-                                  color: AppColors.pureWhite,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
+                              GestureDetector(
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const ProfileSettingsPage(),
+                                    ),
+                                  );
+                                },
+                                child: Container(
+                                  width: 60,
+                                  height: 60,
+                                  decoration: const BoxDecoration(
                                     color: AppColors.pureWhite,
-                                    width: 2,
+                                    shape: BoxShape.circle,
                                   ),
-                                ),
-                                child: ClipOval(
-                                  child: _userPhotoUrl != null && _userPhotoUrl!.isNotEmpty
-                                      ? Image.network(
-                                          _userPhotoUrl!,
-                                          fit: BoxFit.cover,
-                                          errorBuilder: (context, error, stackTrace) {
-                                            return const Icon(
-                                              Icons.person,
-                                              color: AppColors.skyBlue,
-                                              size: 32,
-                                            );
-                                          },
-                                          loadingBuilder: (context, child, loadingProgress) {
-                                            if (loadingProgress == null) return child;
-                                            return const Center(
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                                valueColor: AlwaysStoppedAnimation<Color>(AppColors.skyBlue),
-                                              ),
-                                            );
-                                          },
-                                        )
-                                      : const Icon(
-                                          Icons.person,
-                                          color: AppColors.skyBlue,
-                                          size: 32,
-                                        ),
+                                  child: const Icon(
+                                    Icons.person,
+                                    color: AppColors.skyBlue,
+                                    size: 32,
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 16),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Welcome Back...',
-                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: AppColors.pureWhite,
-                                      fontSize: 14,
+                              GestureDetector(
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const ProfileSettingsPage(),
                                     ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    _userDisplayName ?? 'User',
-                                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                      color: AppColors.pureWhite,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 20,
+                                  );
+                                },
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Welcome Back...',
+                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: AppColors.pureWhite,
+                                        fontSize: 14,
+                                      ),
                                     ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      _userDisplayName,
+                                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                        color: AppColors.pureWhite,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 20,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ],
                           ),
                           // Bell Icon
                           IconButton(
-                            icon: const Icon(
-                              Icons.notifications_outlined,
-                              color: AppColors.pureWhite,
-                              size: 24,
+                            icon: Badge(
+                              isLabelVisible: _unreadNotifications > 0,
+                              label: Text(
+                                _unreadNotifications > 99 ? '99+' : '$_unreadNotifications',
+                                style: const TextStyle(fontSize: 10),
+                              ),
+                              child: const Icon(
+                                Icons.notifications_outlined,
+                                color: AppColors.pureWhite,
+                                size: 24,
+                              ),
                             ),
                             onPressed: () {
                               Navigator.push(
@@ -265,7 +247,7 @@ class _DashboardState extends State<Dashboard> {
                                 MaterialPageRoute(
                                   builder: (context) => const ExpiryManagementPage(),
                                 ),
-                              );
+                              ).then((_) => _refreshUnreadCount());
                             },
                           ),
                         ],
@@ -308,6 +290,20 @@ class _DashboardState extends State<Dashboard> {
                           const SizedBox(height: 2),
                           CategoryGridWidget(
                             categories: [
+                              CategoryItem(
+                                label: 'Scan Stock',
+                                icon: Icons.qr_code_scanner_rounded,
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => const AddEditMedicationPage(
+                                        openScannerOnLoad: true,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                               CategoryItem(
                                 label: 'Tablet',
                                 icon: Icons.medication,
@@ -381,18 +377,6 @@ class _DashboardState extends State<Dashboard> {
                                 },
                               ),
                               CategoryItem(
-                                label: 'Quick Check',
-                                icon: Icons.flash_on,
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => const QuickExpiryCheckPage(),
-                                    ),
-                                  );
-                                },
-                              ),
-                              CategoryItem(
                                 label: 'Stocks',
                                 icon: Icons.inventory,
                                 onTap: () {
@@ -405,6 +389,18 @@ class _DashboardState extends State<Dashboard> {
                                 },
                               ),
                               CategoryItem(
+                                label: 'Reports',
+                                icon: Icons.summarize,
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => const ReportsPage(),
+                                    ),
+                                  );
+                                },
+                              ),
+                              CategoryItem(
                                 label: 'All',
                                 icon: Icons.category,
                                 onTap: () {
@@ -412,6 +408,31 @@ class _DashboardState extends State<Dashboard> {
                                     context,
                                     MaterialPageRoute(
                                       builder: (context) => const CategoriesPage(),
+                                    ),
+                                  );
+                                },
+                              ),
+                              if (_role == UserRole.doctor || _role == UserRole.admin)
+                                CategoryItem(
+                                  label: 'Patients',
+                                  icon: Icons.people,
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => const PatientListPage(),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              CategoryItem(
+                                label: 'Diagnosis',
+                                icon: Icons.medical_services,
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => const DiagnosisHelperPage(),
                                     ),
                                   );
                                 },
@@ -463,7 +484,7 @@ class _DashboardState extends State<Dashboard> {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (context) => const StockReconciliationPage(),
+                                  builder: (context) => const ExpiryManagementPage(initialTab: 2),
                                 ),
                               );
                             },

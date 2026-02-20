@@ -28,3 +28,5 @@ else
     echo "6. Replace medlistapp/android/app/google-services.json"
 fi
 
+
+

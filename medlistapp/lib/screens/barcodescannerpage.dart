@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:medlistapp/services/barcodescannerservice.dart';
-import 'package:medlistapp/services/verificationservice.dart';
 import 'package:medlistapp/utils/appcolors.dart';
 import 'package:medlistapp/screens/medicationdetailpage.dart';
 import 'package:medlistapp/screens/medicationverificationpage.dart';
 
 class BarcodeScannerPage extends StatefulWidget {
-  const BarcodeScannerPage({super.key});
+  /// When true, the page pops with the raw barcode string instead of
+  /// showing match/not-found dialogs. Used by AddEditMedicationPage.
+  final bool returnRawBarcode;
+
+  const BarcodeScannerPage({super.key, this.returnRawBarcode = false});
 
   @override
   State<BarcodeScannerPage> createState() => _BarcodeScannerPageState();
@@ -15,7 +18,6 @@ class BarcodeScannerPage extends StatefulWidget {
 
 class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
   final BarcodeScannerService _scannerService = BarcodeScannerService();
-  final VerificationService _verificationService = VerificationService();
   MobileScannerController? _controller;
   bool _isScanning = false;
   String? _lastScannedBarcode;
@@ -41,15 +43,18 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
     });
 
     try {
-      final result = await _scannerService.matchBarcode(barcode, 'EAN13');
+      if (widget.returnRawBarcode) {
+        if (mounted) Navigator.pop(context, barcode);
+        return;
+      }
+
+      final result = await _scannerService.matchBarcode(barcode, null);
       
       if (!mounted) return;
 
       if (result.matched && result.medication != null) {
-        // Show success dialog with options
         _showScanResultDialog(result.medication!, barcode);
       } else {
-        // Show not found dialog
         _showNotFoundDialog(barcode);
       }
     } catch (e) {
@@ -146,7 +151,9 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text('Scan Barcode'),
+        title: Text(widget.returnRawBarcode
+            ? 'Scan Medicine Barcode'
+            : 'Scan Barcode / QR Code'),
         backgroundColor: AppColors.skyBlue,
         foregroundColor: AppColors.pureWhite,
         elevation: 0,
@@ -158,7 +165,7 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
             onDetect: (capture) {
               final List<Barcode> barcodes = capture.barcodes;
               for (final barcode in barcodes) {
-                if (barcode.rawValue != null) {
+                if (barcode.rawValue != null && barcode.rawValue!.isNotEmpty) {
                   _handleBarcode(barcode.rawValue!);
                   break;
                 }
@@ -172,7 +179,17 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
                 child: CircularProgressIndicator(),
               ),
             ),
-          // Scanning overlay
+          // Scanning frame overlay
+          Center(
+            child: Container(
+              width: 260,
+              height: 260,
+              decoration: BoxDecoration(
+                border: Border.all(color: AppColors.pureWhite.withOpacity(0.6), width: 2),
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+          ),
           Positioned(
             bottom: 100,
             left: 0,
@@ -180,7 +197,9 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
             child: Container(
               padding: const EdgeInsets.all(16),
               child: Text(
-                'Position barcode within the frame',
+                widget.returnRawBarcode
+                    ? 'Scan the DataMatrix / QR code on the medicine box'
+                    : 'Position barcode or QR code within the frame',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white,
@@ -200,4 +219,3 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
     );
   }
 }
-

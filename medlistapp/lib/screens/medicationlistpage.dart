@@ -27,10 +27,8 @@ class _MedicationListPageState extends State<MedicationListPage> {
   List<Medication> _filteredMedications = [];
   bool _isLoading = true;
   String _selectedFormFilter = 'All';
-  String? _selectedStorageFilter;
-  String? _selectedStockLevelFilter;
+  String _selectedStockLevelFilter = 'All';
   final List<String> _formFilters = ['All', 'Tablet', 'Solution', 'Capsule', 'Injection'];
-  final List<String> _storageFilters = ['All', 'Room Temperature', 'Refrigerated', 'Frozen', 'Cool & Dry'];
   final List<String> _stockLevelFilters = ['All', 'In Stock', 'Low Stock', 'Out of Stock', 'Overstocked'];
 
   @override
@@ -51,7 +49,6 @@ class _MedicationListPageState extends State<MedicationListPage> {
       
       setState(() {
         _medications = medications;
-        _filteredMedications = medications;
         _isLoading = false;
       });
       await _applyFilter();
@@ -65,71 +62,73 @@ class _MedicationListPageState extends State<MedicationListPage> {
     }
   }
 
+  /// Form filter matching for MOH data (e.g. "Solution for infusion", "Injection/Solution for").
+  bool _matchesFormFilter(Medication m, String filter) {
+    final form = m.form.toLowerCase();
+    switch (filter) {
+      case 'Tablet':
+        return form.contains('tablet');
+      case 'Solution':
+        return form.contains('solution') && !form.contains('injection') && !form.contains('infusion');
+      case 'Capsule':
+        return form.contains('capsule');
+      case 'Injection':
+        return form.contains('injection') || form.contains('infusion') || form.contains('intravenous');
+      default:
+        return true;
+    }
+  }
+
   Future<void> _applyFilter() async {
     List<Medication> filtered = List.from(_medications);
 
-    // Apply form filter
+    // 1. Apply search filter
+    final query = _searchController.text.trim().toLowerCase();
+    if (query.isNotEmpty) {
+      filtered = filtered
+          .where((m) =>
+              m.tradeName.toLowerCase().contains(query) ||
+              m.activeIngredient.toLowerCase().contains(query) ||
+              m.company.toLowerCase().contains(query))
+          .toList();
+    }
+
+    // 2. Apply form filter with MOH mapping
     if (_selectedFormFilter != 'All') {
-      filtered = filtered
-          .where((m) => m.form.toLowerCase().contains(_selectedFormFilter.toLowerCase()))
-          .toList();
+      filtered = filtered.where((m) => _matchesFormFilter(m, _selectedFormFilter)).toList();
     }
 
-    // Apply storage condition filter
-    if (_selectedStorageFilter != null && _selectedStorageFilter != 'All') {
-      filtered = filtered
-          .where((m) => m.storageCondition != null &&
-              m.storageCondition!.toLowerCase().contains(_selectedStorageFilter!.toLowerCase()))
-          .toList();
-    }
-
-    // Apply stock level filter
-    if (_selectedStockLevelFilter != null && _selectedStockLevelFilter != 'All') {
-      final stockFiltered = <Medication>[];
-      for (final med in filtered) {
-        if (med.id == null) continue;
-        final totalStock = await _stockService.getTotalStockQuantity(med.id!);
-        final isLowStock = await _stockService.isStockLow(med.id!, AppConstants.defaultLowStockThreshold);
-        final isOverstocked = await _stockService.isOverstocked(med.id!);
-
-        bool matches = false;
-        switch (_selectedStockLevelFilter) {
-          case 'In Stock':
-            matches = totalStock > 0 && !isLowStock && !isOverstocked;
-            break;
-          case 'Low Stock':
-            matches = isLowStock && totalStock > 0;
-            break;
-          case 'Out of Stock':
-            matches = totalStock == 0;
-            break;
-          case 'Overstocked':
-            matches = isOverstocked;
-            break;
-        }
-        if (matches) stockFiltered.add(med);
+    // 3. Apply stock level filter (batch)
+    if (_selectedStockLevelFilter != 'All') {
+      final ids = filtered.where((m) => m.id != null).map((m) => m.id!).toList();
+      if (ids.isNotEmpty) {
+        final summary = await _stockService.getStockSummaryForMedications(
+          ids,
+          lowStockThreshold: AppConstants.defaultLowStockThreshold,
+        );
+        filtered = filtered.where((med) {
+          if (med.id == null) return false;
+          final s = summary[med.id!];
+          if (s == null) return _selectedStockLevelFilter == 'Out of Stock';
+          switch (_selectedStockLevelFilter) {
+            case 'In Stock':
+              return s.total > 0 && !s.isLowStock && !s.isOverstocked;
+            case 'Low Stock':
+              return s.isLowStock && s.total > 0;
+            case 'Out of Stock':
+              return s.total == 0;
+            case 'Overstocked':
+              return s.isOverstocked;
+            default:
+              return true;
+          }
+        }).toList();
       }
-      filtered = stockFiltered;
     }
 
-    setState(() => _filteredMedications = filtered);
+    if (mounted) setState(() => _filteredMedications = filtered);
   }
 
-  void _onSearchChanged(String query) {
-    if (query.isEmpty) {
-      _applyFilter();
-    } else {
-      setState(() {
-        _filteredMedications = _medications
-            .where((m) =>
-                m.tradeName.toLowerCase().contains(query.toLowerCase()) ||
-                m.activeIngredient.toLowerCase().contains(query.toLowerCase()) ||
-                m.company.toLowerCase().contains(query.toLowerCase()))
-            .toList();
-      });
-      _applyFilter();
-    }
-  }
 
   @override
   void dispose() {
@@ -157,7 +156,8 @@ class _MedicationListPageState extends State<MedicationListPage> {
                   child: SearchBarWidget(
                     controller: _searchController,
                     hintText: 'Search medications...',
-                    onChanged: _onSearchChanged,
+                    onChanged: (_) => _applyFilter(),
+                    onClear: () => _applyFilter(),
                   ),
                 ),
                 // Filter Chips - Form
@@ -184,32 +184,6 @@ class _MedicationListPageState extends State<MedicationListPage> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                // Filter Chips - Storage Condition
-                SizedBox(
-                  height: 44,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _storageFilters.length,
-                    itemBuilder: (context, index) {
-                      final filter = _storageFilters[index];
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: FilterChipWidget(
-                          label: filter,
-                          isSelected: _selectedStorageFilter == filter,
-                          onTap: () {
-                            setState(() {
-                              _selectedStorageFilter = filter == 'All' ? null : filter;
-                            });
-                            _applyFilter();
-                          },
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 8),
                 // Filter Chips - Stock Level
                 SizedBox(
                   height: 44,
@@ -225,9 +199,7 @@ class _MedicationListPageState extends State<MedicationListPage> {
                           label: filter,
                           isSelected: _selectedStockLevelFilter == filter,
                           onTap: () {
-                            setState(() {
-                              _selectedStockLevelFilter = filter == 'All' ? null : filter;
-                            });
+                            setState(() => _selectedStockLevelFilter = filter);
                             _applyFilter();
                           },
                         ),

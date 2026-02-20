@@ -65,13 +65,14 @@ class ExpiryAlertCard extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(20),
           child: Padding(
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Alert indicator with icon
                 Container(
-                  width: 56,
-                  height: 56,
+                  width: 48,
+                  height: 48,
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [
@@ -95,10 +96,10 @@ class ExpiryAlertCard extends StatelessWidget {
                         ? Icons.error_rounded
                         : Icons.warning_rounded,
                     color: AppColors.pureWhite,
-                    size: 28,
+                    size: 24,
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -122,11 +123,15 @@ class ExpiryAlertCard extends StatelessWidget {
                             color: AppColors.mediumGray,
                           ),
                           const SizedBox(width: 6),
-                          Text(
-                            'Expiry: ${dateFormat.format(stockItem.expiryDate)}',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: AppColors.mediumGray,
-                              fontWeight: FontWeight.w600,
+                          Expanded(
+                            child: Text(
+                              'Expiry: ${dateFormat.format(stockItem.expiryDate)}',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: AppColors.mediumGray,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
                           ),
                         ],
@@ -141,10 +146,14 @@ class ExpiryAlertCard extends StatelessWidget {
                               color: AppColors.mediumGray,
                             ),
                             const SizedBox(width: 6),
-                            Text(
-                              'Batch: ${stockItem.batchNumber}',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: AppColors.mediumGray,
+                            Expanded(
+                              child: Text(
+                                'Batch: ${stockItem.batchNumber}',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppColors.mediumGray,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
                               ),
                             ),
                           ],
@@ -154,55 +163,59 @@ class ExpiryAlertCard extends StatelessWidget {
                   ),
                 ),
                 Flexible(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            alertColor,
-                            alertColor.withOpacity(0.8),
-                          ],
-                        ),
-                        borderRadius: BorderRadius.circular(14),
-                        boxShadow: [
-                          BoxShadow(
-                            color: alertColor.withOpacity(0.4),
-                            blurRadius: 6,
-                            offset: const Offset(0, 2),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                alertColor,
+                                alertColor.withOpacity(0.8),
+                              ],
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                color: alertColor.withOpacity(0.4),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                      child: Text(
-                        alertText,
-                        style: const TextStyle(
-                          color: AppColors.pureWhite,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.5,
+                          child: Text(
+                            alertText,
+                            style: const TextStyle(
+                              color: AppColors.pureWhite,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppColors.softBlue,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        'Qty: ${stockItem.quantity}',
-                        style: TextStyle(
-                          color: AppColors.deepNavy,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
+                        const SizedBox(height: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.softBlue,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            'Qty: ${stockItem.quantity}',
+                            style: TextStyle(
+                              color: AppColors.deepNavy,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
-                    ],
                   ),
                 ),
               ],
